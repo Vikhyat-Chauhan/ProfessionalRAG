@@ -1,9 +1,9 @@
-"""ChromaDB vector store with per-source fingerprint-based cache invalidation."""
+"""Pinecone vector store with per-source fingerprint-based cache invalidation."""
 
 import hashlib
 import logging
 
-import chromadb
+from pinecone import Pinecone, ServerlessSpec
 
 from config import settings
 
@@ -16,45 +16,48 @@ def _source_tag(fingerprint: str) -> str:
 
 
 class VectorStore:
-    def __init__(
-        self,
-        path: str | None = None,
-        collection_name: str | None = None,
-    ):
-        self._path = path or settings.chroma_path
-        self._collection_name = collection_name or settings.collection_name
-        self._client: chromadb.ClientAPI | None = None
-        self._collection: chromadb.Collection | None = None
-        self._next_id: int | None = None
+    def __init__(self, index_name: str | None = None):
+        self._index_name = index_name or settings.pinecone_index
+        self._pc: Pinecone | None = None
+        self._index = None
 
     @property
-    def client(self) -> chromadb.ClientAPI:
-        if self._client is None:
-            self._client = chromadb.PersistentClient(path=self._path)
-        return self._client
+    def pc(self) -> Pinecone:
+        if self._pc is None:
+            self._pc = Pinecone(api_key=settings.pinecone_api_key)
+        return self._pc
 
     @property
-    def collection(self) -> chromadb.Collection:
-        if self._collection is None:
-            self._collection = self.client.get_or_create_collection(
-                self._collection_name
-            )
-        return self._collection
+    def index(self):
+        if self._index is None:
+            # Create index if it doesn't exist
+            existing = [idx.name for idx in self.pc.list_indexes()]
+            if self._index_name not in existing:
+                log.info("Creating Pinecone index: %s", self._index_name)
+                self.pc.create_index(
+                    name=self._index_name,
+                    dimension=settings.embedding_dim,
+                    metric="cosine",
+                    spec=ServerlessSpec(
+                        cloud=settings.pinecone_cloud,
+                        region=settings.pinecone_region,
+                    ),
+                )
+            self._index = self.pc.Index(self._index_name)
+        return self._index
 
-    def _get_next_id(self) -> int:
-        """Return an auto-incrementing chunk ID that won't collide."""
-        if self._next_id is None:
-            self._next_id = self.collection.count()
-        val = self._next_id
-        self._next_id += 1
-        return val
+    def count(self) -> int:
+        """Return total vector count in the index."""
+        stats = self.index.describe_index_stats()
+        return stats.total_vector_count
 
     def needs_ingestion(self, fingerprint: str) -> bool:
-        """Check whether the collection already holds data for this fingerprint."""
+        """Check whether the index already holds data for this fingerprint."""
         fp_id = f"__fp_{_source_tag(fingerprint)}__"
         try:
-            existing = self.collection.get(ids=[fp_id])
-            if existing["documents"] and existing["documents"][0] == fingerprint:
+            result = self.index.fetch(ids=[fp_id])
+            vec = result.vectors.get(fp_id)
+            if vec and vec.metadata.get("fingerprint") == fingerprint:
                 return False
         except Exception:
             pass
@@ -78,27 +81,35 @@ class VectorStore:
             meta["source_tag"] = tag
             meta["type"] = "chunk"
 
-        # Store chunks in batches
-        batch_size = 5000
+        # Upsert chunks in batches (Pinecone limit: 100 vectors per upsert)
+        batch_size = 100
         for start in range(0, len(chunks), batch_size):
             end = min(start + batch_size, len(chunks))
-            self.collection.add(
-                ids=[f"chunk_{self._get_next_id()}" for _ in range(start, end)],
-                documents=chunks[start:end],
-                embeddings=embeddings[start:end],
-                metadatas=metadatas[start:end],
-            )
+            vectors = []
+            for i in range(start, end):
+                vectors.append({
+                    "id": f"chunk_{tag}_{i}",
+                    "values": embeddings[i],
+                    "metadata": {
+                        **metadatas[i],
+                        "text": chunks[i],
+                    },
+                })
+            self.index.upsert(vectors=vectors)
 
-        # Store fingerprint marker
-        embed_dim = len(embeddings[0]) if embeddings else 768
+        # Store fingerprint marker (tiny non-zero vector — Pinecone rejects all-zeros)
+        embed_dim = len(embeddings[0]) if embeddings else settings.embedding_dim
         fp_id = f"__fp_{tag}__"
-        # Upsert in case it already exists
-        self.collection.upsert(
-            ids=[fp_id],
-            documents=[fingerprint],
-            embeddings=[[0.0] * embed_dim],
-            metadatas=[{"type": "fingerprint", "source_tag": tag}],
-        )
+        marker_vec = [1e-7] * embed_dim
+        self.index.upsert(vectors=[{
+            "id": fp_id,
+            "values": marker_vec,
+            "metadata": {
+                "type": "fingerprint",
+                "source_tag": tag,
+                "fingerprint": fingerprint,
+            },
+        }])
 
         count = len(chunks)
         log.info("Ingested %d chunks (source tag: %s)", count, tag)
@@ -107,10 +118,10 @@ class VectorStore:
     def _remove_source(self, tag: str) -> None:
         """Delete all chunks and the fingerprint marker for a given source tag."""
         try:
-            self.collection.delete(where={"source_tag": tag})
+            # Pinecone serverless supports delete by metadata filter
+            self.index.delete(filter={"source_tag": {"$eq": tag}})
             log.info("Cleared previous chunks for source tag %s", tag)
         except Exception:
-            # No matching docs — nothing to delete
             pass
 
     def query(
@@ -120,14 +131,23 @@ class VectorStore:
     ) -> tuple[list[str], list[dict]]:
         """Return candidate chunks and their metadata."""
         n = n_results or settings.candidate_count
-        total = self.collection.count()
+        total = self.count()
         if total == 0:
             return [], []
-        results = self.collection.query(
-            query_embeddings=[query_embedding],
-            n_results=min(n, total),
-            where={"type": "chunk"},
+
+        results = self.index.query(
+            vector=query_embedding,
+            top_k=min(n, total),
+            include_metadata=True,
+            filter={"type": {"$eq": "chunk"}},
         )
-        chunks = results["documents"][0]
-        metas = [m if m else {} for m in results["metadatas"][0]]
+
+        chunks = []
+        metas = []
+        for match in results.matches:
+            meta = dict(match.metadata) if match.metadata else {}
+            text = meta.pop("text", "")
+            chunks.append(text)
+            metas.append(meta)
+
         return chunks, metas

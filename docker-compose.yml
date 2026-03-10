@@ -6,10 +6,6 @@ services:
     env_file:
       - .env
     volumes:
-      - chroma_data:/app/chroma_db
       - ./metrics_log.jsonl:/app/metrics_log.jsonl
       - ./pdfs:/app/pdfs
     restart: unless-stopped
-
-volumes:
-  chroma_data:

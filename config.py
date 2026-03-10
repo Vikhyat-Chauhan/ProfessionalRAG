@@ -20,9 +20,12 @@ class Settings(BaseSettings):
     candidate_count: int = 50
     top_k: int = 5
 
-    # Storage
-    chroma_path: str = "./chroma_db"
-    collection_name: str = "documents"
+    # Storage (Pinecone)
+    pinecone_api_key: str = Field(default="", alias="PINECONE_API_KEY")
+    pinecone_index: str = "professional-rag"
+    pinecone_cloud: str = "aws"
+    pinecone_region: str = "us-east-1"
+    embedding_dim: int = 768
 
     # Cost tracking (USD per million tokens)
     cost_per_m_input_tokens: float = 3.0

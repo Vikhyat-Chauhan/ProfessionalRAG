@@ -3,7 +3,6 @@ __pycache__/
 venv/
 .venv/
 .env
-chroma_db/
 pdfs/
 *.egg-info/
 dist/

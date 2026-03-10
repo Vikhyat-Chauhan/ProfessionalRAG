@@ -37,7 +37,7 @@ Built from scratch — no LangChain, no LlamaIndex. Every component (chunker, em
 +---------v--------+  +---------v--------+  +---------v--------+
 |    Ingestion     |  |    Retrieval     |  |   Generation     |
 |  PDF + GitHub    |  |  BGE Embedder   |  |  Claude LLM      |
-|  Recursive       |  |  ChromaDB Store |  |  Token + Cost    |
+|  Recursive       |  |  Pinecone Store |  |  Token + Cost    |
 |  Chunker         |  |  Cross-Encoder  |  |  Tracking        |
 |  SHA-256 Cache   |  |  Reranker       |  |                  |
 +------------------+  +------------------+  +------------------+
@@ -68,7 +68,7 @@ PDF / GitHub Repo → Page Extraction → SHA-256 Fingerprint → Recursive Chun
 
 ### 2. Retrieval (Two-Stage)
 ```
-Query → BGE Embedding → ChromaDB ANN Search (50 candidates) → Cross-Encoder Rerank → Top-K Results
+Query → BGE Embedding → Pinecone ANN Search (50 candidates) → Cross-Encoder Rerank → Top-K Results
 ```
 - **Stage 1:** Fast approximate nearest neighbor search retrieves 50 candidates
 - **Stage 2:** Cross-encoder (`ms-marco-MiniLM-L-6-v2`) scores each query-chunk pair for precision reranking
@@ -141,7 +141,7 @@ Every query produces a structured metrics record appended to `metrics_log.jsonl`
 | **LLM** | Claude (claude-sonnet-4-6) | Strong instruction-following, structured output, cost-effective |
 | **Embeddings** | BAAI/bge-base-en-v1.5 (768-dim) | Top-tier open embedding model with query/passage prefix support |
 | **Reranker** | cross-encoder/ms-marco-MiniLM-L-6-v2 | Fast cross-encoder trained on MS MARCO — strong relevance signal |
-| **Vector Store** | ChromaDB (persistent SQLite) | Simple, embedded, no infra overhead — right-sized for the use case |
+| **Vector Store** | Pinecone (serverless) | Managed, scalable, no infra to maintain — persistent across deploys |
 | **API** | FastAPI + Uvicorn | Async-ready, auto-generated OpenAPI docs, Pydantic integration |
 | **CLI** | Click | Clean subcommand interface with built-in help |
 | **Config** | Pydantic Settings + .env | Type-safe env var parsing with defaults and validation |
@@ -160,7 +160,7 @@ ProfessionalRAG/
 │   └── chunker.py              # Zero-dependency recursive character splitter
 ├── retrieval/
 │   ├── embedder.py             # BGE embedding with query:/passage: prefixes
-│   ├── store.py                # ChromaDB with per-source fingerprint cache invalidation
+│   ├── store.py                # Pinecone vector store with per-source fingerprint cache invalidation
 │   └── reranker.py             # Cross-encoder reranker (MS MARCO)
 ├── generation/
 │   └── llm.py                  # Claude client with grounded system prompt + token tracking
@@ -173,7 +173,7 @@ ProfessionalRAG/
 ├── config.py                   # Pydantic Settings (env-driven, type-safe)
 ├── cli.py                      # Click CLI (ingest, query, evaluate, stats, serve)
 ├── Dockerfile                  # Production container (python:3.12-slim)
-├── docker-compose.yml          # One-command deploy with persistent ChromaDB volume
+├── docker-compose.yml          # One-command local deploy
 └── golden_example.json         # Example evaluation dataset
 ```
 
@@ -217,7 +217,7 @@ cd ProfessionalRAG
 pip install -r requirements.txt
 
 # Configure
-cp .env.example .env   # Add your ANTHROPIC_API_KEY
+cp .env.example .env   # Add your ANTHROPIC_API_KEY and PINECONE_API_KEY
 
 # Ingest a document
 python cli.py ingest /path/to/document.pdf
@@ -252,6 +252,10 @@ All settings are environment-driven via Pydantic Settings:
 | Variable | Default | Description |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | — | Required |
+| `PINECONE_API_KEY` | — | Required |
+| `PINECONE_INDEX` | `professional-rag` | Pinecone index name |
+| `PINECONE_CLOUD` | `aws` | Cloud provider |
+| `PINECONE_REGION` | `us-east-1` | Region |
 | `LLM_MODEL` | `claude-sonnet-4-6` | LLM model |
 | `EMBEDDING_MODEL` | `BAAI/bge-base-en-v1.5` | Embedding model |
 | `RERANKER_MODEL` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Reranker model |

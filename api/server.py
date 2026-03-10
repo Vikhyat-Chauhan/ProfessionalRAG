@@ -68,7 +68,7 @@ def ingest(req: IngestRequest):
 @app.post("/query", response_model=QueryResponse)
 def query(req: QueryRequest):
     """Query the RAG pipeline."""
-    if pipeline.store.collection.count() == 0:
+    if pipeline.store.count() == 0:
         raise HTTPException(
             status_code=400,
             detail="No documents ingested. POST /ingest first.",
@@ -96,5 +96,5 @@ def get_metrics():
 def health():
     return {
         "status": "ok",
-        "collection_count": pipeline.store.collection.count(),
+        "collection_count": pipeline.store.count(),
     }
