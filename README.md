@@ -1,8 +1,22 @@
 # ProfessionalRAG
 
-**Production-grade Retrieval-Augmented Generation pipeline with built-in evaluation, cost tracking, and observability.**
+**Production-grade Retrieval-Augmented Generation system with two-stage retrieval, LLM-as-judge evaluation, and per-query cost observability.**
 
-A modular RAG system that ingests PDFs, performs semantic retrieval with cross-encoder reranking, generates grounded answers via Claude, and evaluates quality through golden datasets and LLM-as-judge scoring — all with per-query latency and cost instrumentation.
+Built from scratch — no LangChain, no LlamaIndex. Every component (chunker, embedder, reranker, vector store, evaluator, metrics collector) is hand-written with clear separation of concerns.
+
+---
+
+## Why This Project Stands Out
+
+| What | How |
+|---|---|
+| **Two-stage retrieval** | Embedding recall (50 candidates) + cross-encoder reranking (top-k precision) — the same pattern used in production search systems at scale |
+| **Zero-dependency chunker** | Recursive character splitter with configurable separator hierarchy and overlap — no framework lock-in |
+| **SHA-256 cache invalidation** | Fingerprint-based skip logic prevents redundant embedding computation on unchanged documents |
+| **LLM-as-judge evaluation** | Automated answer quality scoring (1-5) across Faithfulness, Completeness, and Conciseness — not just vibes |
+| **Per-query cost instrumentation** | Every query logs latency breakdown, token counts, and USD cost to a JSONL stream — production observability from day one |
+| **Lazy model loading** | Embedder and reranker initialize on first use, not at import — fast cold starts, testable without GPU |
+| **Clean architecture** | Ingestion / Retrieval / Generation / Evaluation / Monitoring — each layer is independently testable and swappable |
 
 ---
 
@@ -22,7 +36,7 @@ A modular RAG system that ingests PDFs, performs semantic retrieval with cross-e
           |                     |                     |
 +---------v--------+  +---------v--------+  +---------v--------+
 |    Ingestion     |  |    Retrieval     |  |   Generation     |
-|  PDF Reader      |  |  BGE Embedder   |  |  Claude LLM      |
+|  PDF + GitHub    |  |  BGE Embedder   |  |  Claude LLM      |
 |  Recursive       |  |  ChromaDB Store |  |  Token + Cost    |
 |  Chunker         |  |  Cross-Encoder  |  |  Tracking        |
 |  SHA-256 Cache   |  |  Reranker       |  |                  |
@@ -39,39 +53,48 @@ A modular RAG system that ingests PDFs, performs semantic retrieval with cross-e
                                            +------------------+
 ```
 
-### Component Breakdown
-
-| Layer | Component | What It Does |
-|---|---|---|
-| **Ingestion** | `reader.py` | Extracts page-level text from PDFs with SHA-256 fingerprinting for change detection |
-| **Ingestion** | `chunker.py` | Zero-dependency recursive character splitter (500 chars, 50 overlap) |
-| **Retrieval** | `embedder.py` | BGE embeddings with proper `query:`/`passage:` prefixes |
-| **Retrieval** | `store.py` | ChromaDB persistent vector store with fingerprint-based cache invalidation |
-| **Retrieval** | `reranker.py` | Cross-encoder reranking (MS MARCO MiniLM) for precision |
-| **Generation** | `llm.py` | Claude integration with system-prompt grounding and token tracking |
-| **Evaluation** | `golden.py` | Hit@K and MRR computation against golden QA datasets |
-| **Evaluation** | `judge.py` | LLM-as-judge scoring (1-5) on Faithfulness, Completeness, Conciseness |
-| **Monitoring** | `metrics.py` | Per-query latency breakdown, token counting, cost calculation, JSONL logging |
-
 ---
 
-## Key Engineering Decisions
+## How It Works
 
-| Decision | Rationale |
-|---|---|
-| **Two-stage retrieval** (embedding + cross-encoder rerank) | Retrieve 50 candidates fast, then precision-rank the top-k with a cross-encoder — balances recall and relevance |
-| **SHA-256 fingerprint caching** | Skip re-ingestion when the source document hasn't changed; avoids redundant embedding computation |
-| **Zero-dependency chunker** | Recursive character splitting without LangChain — full control over separator hierarchy and overlap logic |
-| **JSONL metrics streaming** | Append-only log for every query; enables post-hoc analysis without impacting query latency |
-| **Pydantic Settings** | Type-safe configuration with env var support and validation — no stringly-typed configs |
-| **Lazy model loading** | Embedder and reranker models initialize on first use, not at import time |
-| **Context manager latency tracking** | `with metrics.track_latency("retrieval"):` — clean, composable instrumentation |
+### 1. Ingestion
+```
+PDF / GitHub Repo → Page Extraction → SHA-256 Fingerprint → Recursive Chunking → BGE Embedding → ChromaDB
+```
+- Reads PDFs page-by-page or clones GitHub repos and reads source files
+- SHA-256 fingerprint check skips re-ingestion if the source hasn't changed
+- Recursive character splitter (500 chars, 50 overlap) with separator priority: `\n\n` → `\n` → `. ` → ` ` → `""`
+- Chunks are tagged with a source identifier for per-source cache invalidation
+
+### 2. Retrieval (Two-Stage)
+```
+Query → BGE Embedding → ChromaDB ANN Search (50 candidates) → Cross-Encoder Rerank → Top-K Results
+```
+- **Stage 1:** Fast approximate nearest neighbor search retrieves 50 candidates
+- **Stage 2:** Cross-encoder (`ms-marco-MiniLM-L-6-v2`) scores each query-chunk pair for precision reranking
+- This retrieve-then-rerank pattern balances recall and relevance — the same approach used in production search at Google, Bing, and Cohere
+
+### 3. Generation
+```
+Top-K Chunks + Query → Grounded System Prompt → Claude → Answer with Source Citations
+```
+- System prompt enforces grounded answers — the model must refuse if evidence is insufficient
+- Token usage (input/output) tracked per query with configurable cost rates
+- Lazy client initialization — no API calls until the first query
+
+### 4. Evaluation
+```
+Golden Dataset (Q/A/Pages) → Retrieval Metrics (Hit@K, MRR) → LLM-as-Judge (1-5 Score)
+```
+- **Hit@K:** Did the expected page appear in top-k retrieved chunks?
+- **MRR:** Mean Reciprocal Rank — how high did the first relevant result rank?
+- **LLM-as-Judge:** Claude rates each answer on Faithfulness, Completeness, and Conciseness (1-5 scale)
 
 ---
 
 ## Metrics & Observability
 
-Every query produces a structured metrics record:
+Every query produces a structured metrics record appended to `metrics_log.jsonl`:
 
 ```json
 {
@@ -89,33 +112,40 @@ Every query produces a structured metrics record:
 ```
 
 **What's tracked:**
-- **Latency breakdown** — retrieval, reranking, and LLM generation timed independently
+- **Latency breakdown** — retrieval, reranking, and LLM generation timed independently via context manager instrumentation
 - **Token economics** — input/output tokens with configurable per-million-token cost rates
 - **Relevance signal** — top cross-encoder score as a retrieval quality proxy
-- **Persistent log** — `metrics_log.jsonl` for trend analysis and regression detection
+- **Persistent log** — append-only JSONL for trend analysis and regression detection
 
-### Evaluation Metrics
+---
 
-| Metric | What It Measures |
+## Key Engineering Decisions
+
+| Decision | Rationale |
 |---|---|
-| **Hit@K** | Did the expected page appear in the top-k retrieved chunks? |
-| **MRR** | Mean Reciprocal Rank — how high did the first relevant result rank? |
-| **Judge Score (1-5)** | LLM-rated answer quality across faithfulness, completeness, and conciseness |
+| **No LangChain / LlamaIndex** | Full control over every component — easier to debug, profile, and optimize |
+| **Two-stage retrieval** | Embedding search is fast but imprecise; cross-encoder reranking adds precision without the cost of reranking the entire corpus |
+| **SHA-256 fingerprint caching** | Avoids redundant embedding computation — critical when ingestion involves expensive model inference |
+| **JSONL metrics streaming** | Append-only, zero-contention logging — enables post-hoc analysis without impacting query latency |
+| **Pydantic Settings** | Type-safe, env-driven configuration with validation — no stringly-typed configs or missing key surprises |
+| **Context manager latency tracking** | `with metrics.track_latency("retrieval"):` — composable instrumentation that's impossible to forget to close |
+| **Lazy model loading** | Models load on first use, not at import — keeps tests fast and startup cheap |
+| **Source-tagged vector store** | Each ingested source gets an MD5-based tag, enabling per-source cache invalidation without wiping the entire collection |
 
 ---
 
 ## Tech Stack
 
-| Layer | Technology |
-|---|---|
-| **Language** | Python 3.13 |
-| **LLM** | Anthropic Claude (claude-sonnet-4-6) |
-| **Embeddings** | BAAI/bge-base-en-v1.5 (768-dim) |
-| **Reranker** | cross-encoder/ms-marco-MiniLM-L-6-v2 |
-| **Vector Store** | ChromaDB (persistent SQLite backend) |
-| **API Framework** | FastAPI + Uvicorn |
-| **CLI** | Click |
-| **Config** | Pydantic Settings + .env |
+| Layer | Technology | Why |
+|---|---|---|
+| **LLM** | Claude (claude-sonnet-4-6) | Strong instruction-following, structured output, cost-effective |
+| **Embeddings** | BAAI/bge-base-en-v1.5 (768-dim) | Top-tier open embedding model with query/passage prefix support |
+| **Reranker** | cross-encoder/ms-marco-MiniLM-L-6-v2 | Fast cross-encoder trained on MS MARCO — strong relevance signal |
+| **Vector Store** | ChromaDB (persistent SQLite) | Simple, embedded, no infra overhead — right-sized for the use case |
+| **API** | FastAPI + Uvicorn | Async-ready, auto-generated OpenAPI docs, Pydantic integration |
+| **CLI** | Click | Clean subcommand interface with built-in help |
+| **Config** | Pydantic Settings + .env | Type-safe env var parsing with defaults and validation |
+| **Container** | Docker + Docker Compose | One-command deployment with persistent volume for ChromaDB |
 
 ---
 
@@ -124,26 +154,27 @@ Every query produces a structured metrics record:
 ```
 ProfessionalRAG/
 ├── api/
-│   └── server.py           # FastAPI endpoints (/health, /ingest, /query, /evaluate, /metrics)
+│   └── server.py              # FastAPI REST API (5 endpoints)
 ├── ingestion/
-│   ├── reader.py            # PDF extraction + SHA-256 fingerprinting
-│   └── chunker.py           # Recursive text splitter (zero dependencies)
+│   ├── reader.py               # PDF extraction + GitHub repo cloning + SHA-256 fingerprinting
+│   └── chunker.py              # Zero-dependency recursive character splitter
 ├── retrieval/
-│   ├── embedder.py          # BGE embedding wrapper
-│   ├── store.py             # ChromaDB vector store with batch ingestion
-│   └── reranker.py          # Cross-encoder reranker
+│   ├── embedder.py             # BGE embedding with query:/passage: prefixes
+│   ├── store.py                # ChromaDB with per-source fingerprint cache invalidation
+│   └── reranker.py             # Cross-encoder reranker (MS MARCO)
 ├── generation/
-│   └── llm.py               # Claude client with cost tracking
+│   └── llm.py                  # Claude client with grounded system prompt + token tracking
 ├── evaluation/
-│   ├── golden.py            # Golden dataset evaluation (Hit@K, MRR)
-│   └── judge.py             # LLM-as-judge scoring
+│   ├── golden.py               # Golden dataset eval (Hit@K, MRR)
+│   └── judge.py                # LLM-as-judge scoring (Faithfulness/Completeness/Conciseness)
 ├── monitoring/
-│   └── metrics.py           # Latency, tokens, cost — JSONL streaming
-├── pipeline.py              # RAG orchestrator
-├── config.py                # Pydantic settings (env-driven)
-├── cli.py                   # Click CLI
-├── golden_example.json      # Example evaluation dataset
-└── metrics_log.jsonl        # Query metrics history
+│   └── metrics.py              # Per-query latency, tokens, cost — JSONL streaming
+├── pipeline.py                 # Orchestrator: ingest → retrieve → rerank → generate → evaluate
+├── config.py                   # Pydantic Settings (env-driven, type-safe)
+├── cli.py                      # Click CLI (ingest, query, evaluate, stats, serve)
+├── Dockerfile                  # Production container (python:3.12-slim)
+├── docker-compose.yml          # One-command deploy with persistent ChromaDB volume
+└── golden_example.json         # Example evaluation dataset
 ```
 
 ---
@@ -152,13 +183,13 @@ ProfessionalRAG/
 
 | Endpoint | Method | Purpose |
 |---|---|---|
-| `/health` | `GET` | Health check + collection count |
-| `/ingest` | `POST` | Ingest a PDF (with fingerprint-based skip) |
-| `/query` | `POST` | Full retrieve-rerank-generate pipeline |
-| `/evaluate` | `POST` | Run evaluation against a golden dataset |
+| `/health` | `GET` | Health check + document count |
+| `/ingest` | `POST` | Ingest PDF(s) with fingerprint-based dedup |
+| `/query` | `POST` | Full retrieve → rerank → generate pipeline |
+| `/evaluate` | `POST` | Run eval against golden dataset |
 | `/metrics` | `GET` | Aggregated performance statistics |
 
-**Query response shape:**
+**Example query response:**
 
 ```json
 {
@@ -186,8 +217,7 @@ cd ProfessionalRAG
 pip install -r requirements.txt
 
 # Configure
-cp .env.example .env
-# Add your ANTHROPIC_API_KEY to .env
+cp .env.example .env   # Add your ANTHROPIC_API_KEY
 
 # Ingest a document
 python cli.py ingest /path/to/document.pdf
@@ -198,29 +228,37 @@ python cli.py query "What methodology was used in this research?"
 # Start the API server
 python cli.py serve
 
-# Run evaluation
+# Run evaluation against a golden dataset
 python cli.py evaluate golden_example.json
 
 # View aggregated metrics
 python cli.py stats --last 50
 ```
 
+### Docker
+
+```bash
+docker compose up --build
+# API available at http://localhost:8000
+# Docs at http://localhost:8000/docs
+```
+
 ---
 
 ## Configuration
 
-All settings are environment-driven via Pydantic:
+All settings are environment-driven via Pydantic Settings:
 
 | Variable | Default | Description |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | — | Claude API key (required) |
+| `ANTHROPIC_API_KEY` | — | Required |
 | `LLM_MODEL` | `claude-sonnet-4-6` | LLM model |
 | `EMBEDDING_MODEL` | `BAAI/bge-base-en-v1.5` | Embedding model |
 | `RERANKER_MODEL` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Reranker model |
 | `CHUNK_SIZE` | `500` | Characters per chunk |
 | `CHUNK_OVERLAP` | `50` | Overlap between chunks |
-| `CANDIDATE_COUNT` | `50` | Candidates before reranking |
-| `TOP_K` | `5` | Final results returned |
+| `CANDIDATE_COUNT` | `50` | Embedding candidates before reranking |
+| `TOP_K` | `5` | Final results after reranking |
 | `COST_PER_M_INPUT_TOKENS` | `3.0` | USD per million input tokens |
 | `COST_PER_M_OUTPUT_TOKENS` | `15.0` | USD per million output tokens |
 

@@ -1,7 +1,6 @@
 """LLM generation via Anthropic API with token/cost tracking."""
 
 import logging
-
 import anthropic
 
 from config import settings
@@ -12,7 +11,7 @@ log = logging.getLogger(__name__)
 SYSTEM_PROMPT = (
     "You are an assistant that answers questions strictly based on the provided context. "
     "If the answer is not present in the context, say \"I don't have enough information to answer that.\" "
-    "Always reference the page number when citing information."
+    #"Always reference the page number when citing information."
 )
 
 
@@ -64,7 +63,13 @@ class LLMClient:
         for chunk, meta in context_blocks:
             page = meta.get("page", "?")
             source = meta.get("source", "")
-            header = f"[Page {page}]" + (f" ({source})" if source else "")
+            # Use "File:" for code files, "Page:" for PDFs
+            if isinstance(page, str) and "/" in page:
+                header = f"[File: {page}]"
+            else:
+                header = f"[Page {page}]"
+            if source:
+                header += f" ({source})"
             parts.append(f"{header}\n{chunk}")
 
         context = "\n\n---\n\n".join(parts)

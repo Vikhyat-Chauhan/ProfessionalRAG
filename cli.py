@@ -1,4 +1,4 @@
-"""CLI interface for ProfileRAG."""
+"""CLI interface for ProfessionalRAG."""
 
 import json
 import logging
@@ -13,7 +13,7 @@ from monitoring.metrics import metrics
 @click.group()
 @click.option("--verbose", "-v", is_flag=True, help="Enable debug logging")
 def cli(verbose: bool):
-    """ProfileRAG — production RAG over company documents."""
+    """ProfessionalRAG — production RAG over company documents."""
     level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(
         level=level,
@@ -22,13 +22,17 @@ def cli(verbose: bool):
 
 
 @cli.command()
-@click.argument("pdf_path")
+@click.argument("pdf_paths", nargs=-1, required=True)
 @click.option("--force", is_flag=True, help="Force re-ingestion even if unchanged")
-def ingest(pdf_path: str, force: bool):
-    """Ingest a PDF into the vector store."""
+def ingest(pdf_paths: tuple[str, ...], force: bool):
+    """Ingest one or more PDFs into the vector store."""
     pipe = RAGPipeline()
-    count = pipe.ingest(pdf_path, force=force)
-    click.echo(f"Done — {count} chunks stored.")
+    total = 0
+    for path in pdf_paths:
+        count = pipe.ingest(path, force=force)
+        click.echo(f"  {path}: {count} chunks")
+        total += count
+    click.echo(f"Done — {total} chunks stored from {len(pdf_paths)} file(s).")
 
 
 @cli.command()

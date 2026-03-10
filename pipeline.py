@@ -1,9 +1,10 @@
 """RAG pipeline — orchestrates ingestion, retrieval, reranking, and generation."""
 
 import logging
+from pathlib import Path
 
 from config import settings
-from ingestion.reader import read_pdf, file_fingerprint
+from ingestion.reader import read_pdf, read_repo, is_github_url, file_fingerprint, dir_fingerprint
 from ingestion.chunker import ChunkHelper, ChunkConfig
 from retrieval.embedder import Embedder
 from retrieval.store import VectorStore
@@ -21,23 +22,31 @@ class RAGPipeline:
         self.reranker = Reranker()
         self.llm = LLMClient()
 
-    def ingest(self, pdf_path: str, force: bool = False) -> int:
-        """Ingest a PDF into the vector store. Returns chunk count.
+    def ingest(self, source: str, force: bool = False) -> int:
+        """Ingest a PDF or GitHub repo into the vector store. Returns chunk count.
 
-        Skips ingestion if the file hasn't changed (based on SHA-256),
-        unless force=True.
+        Accepts a local PDF path, a local directory, or a GitHub URL
+        (https://github.com/owner/repo). Skips ingestion if the source
+        hasn't changed (based on SHA-256), unless force=True.
         """
-        fp = file_fingerprint(pdf_path)
+        is_repo = is_github_url(source) or (
+            not source.lower().endswith(".pdf") and Path(source).is_dir()
+        )
+
+        fp = dir_fingerprint(source) if is_repo else file_fingerprint(source)
 
         if not force and not self.store.needs_ingestion(fp):
-            count = self.store.collection.count() - 1
-            log.info("Skipping ingestion — file unchanged (%d chunks)", count)
-            return count
+            log.info("Skipping ingestion — source unchanged")
+            return 0
 
-        log.info("Reading PDF: %s", pdf_path)
-        pages = read_pdf(pdf_path)
-        for page in pages:
-            page["source"] = pdf_path
+        if is_repo:
+            log.info("Reading repo: %s", source)
+            pages = read_repo(source)
+        else:
+            log.info("Reading PDF: %s", source)
+            pages = read_pdf(source)
+            for page in pages:
+                page["source"] = source
 
         cfg = ChunkConfig(
             chunk_size=settings.chunk_size,

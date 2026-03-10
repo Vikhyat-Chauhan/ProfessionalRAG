@@ -4,8 +4,10 @@ venv/
 .venv/
 .env
 chroma_db/
+pdfs/
 *.egg-info/
 dist/
 build/
 .pytest_cache/
 metrics_log.jsonl
+GCP_DEPLOYMENT_ROADMAP.md
