@@ -1,0 +1,12 @@
+[
+    {
+        "question": "What is the main thesis of the document?",
+        "expected_answer": "The document discusses the main thesis topic as outlined in the introduction.",
+        "expected_pages": [1, 2]
+    },
+    {
+        "question": "What methodology was used?",
+        "expected_answer": "The research methodology is described in the methods section.",
+        "expected_pages": [3, 4, 5]
+    }
+]
