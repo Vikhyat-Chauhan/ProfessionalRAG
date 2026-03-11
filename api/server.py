@@ -59,7 +59,8 @@ class QueryRequest(BaseModel):
     top_k: int = 5
 
 class IngestRequest(BaseModel):
-    pdf_path: str | list[str]
+    source: str | list[str] | None = None
+    pdf_path: str | list[str] | None = None  # deprecated alias for source
     force: bool = False
 
 class Source(BaseModel):
@@ -99,13 +100,16 @@ class ChatRequest(BaseModel):
 @app.post("/ingest", response_model=IngestResponse)
 @limiter.limit("5/minute")
 def ingest(request: Request, req: IngestRequest):
-    """Ingest one or more PDFs into the vector store."""
-    paths = req.pdf_path if isinstance(req.pdf_path, list) else [req.pdf_path]
+    """Ingest one or more sources (PDF, DOCX, PPTX, CSV, JSON, text, image, URL, repo)."""
+    raw = req.source or req.pdf_path
+    if not raw:
+        raise HTTPException(status_code=422, detail="Provide 'source' (or 'pdf_path').")
+    sources = raw if isinstance(raw, list) else [raw]
     total = 0
     try:
-        for path in paths:
-            total += pipeline.ingest(path, force=req.force)
-        return IngestResponse(chunks=total, message=f"Ingested {total} chunks from {len(paths)} file(s)")
+        for src in sources:
+            total += pipeline.ingest(src, force=req.force)
+        return IngestResponse(chunks=total, message=f"Ingested {total} chunks from {len(sources)} source(s)")
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
 

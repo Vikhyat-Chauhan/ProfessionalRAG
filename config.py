@@ -9,13 +9,13 @@ class Settings(BaseSettings):
 
     # Models
     llm_model: str = "claude-sonnet-4-6"
-    llm_max_tokens: int = 1024
+    llm_max_tokens: int = 2048
     embedding_model: str = "BAAI/bge-base-en-v1.5"
     reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
     # Chunking
-    chunk_size: int = 500
-    chunk_overlap: int = 50
+    chunk_size: int = 1200
+    chunk_overlap: int = 200
 
     # Retrieval
     candidate_count: int = 50
