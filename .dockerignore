@@ -9,7 +9,6 @@ dist/
 build/
 .pytest_cache/
 .DS_Store
-pdfs/
 metrics_log.jsonl
 README.md
 LICENSE
