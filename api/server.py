@@ -3,27 +3,54 @@
 import json
 import logging
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 from pipeline import RAGPipeline
 from monitoring.metrics import metrics
+from config import settings
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(name)s  %(message)s")
 
+limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(title="ProfessionalRAG", version="1.0.0")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, lambda req, exc: JSONResponse(
+    status_code=429, content={"detail": "Rate limit exceeded. Try again later."},
+))
+
+ALLOWED_ORIGINS = [
+    "https://vikhyatchauhan.com",
+    "https://vikhyatchauhan.com/chat",
+    "http://localhost:4321",               # local Astro dev server
+]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,  # or just remove this line, False is default, it fails if you dont add origins
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 pipeline = RAGPipeline()
+
+
+@app.middleware("http")
+async def verify_api_key(request: Request, call_next):
+    """Reject requests without a valid API key (skip health check)."""
+    if request.url.path == "/health":
+        return await call_next(request)
+    if not settings.api_key:
+        return await call_next(request)
+    auth = request.headers.get("Authorization", "")
+    if auth != f"Bearer {settings.api_key}":
+        return JSONResponse(status_code=401, content={"detail": "Invalid API key"})
+    return await call_next(request)
 
 
 # ── Request / Response models ──────────────────────────────────────────
@@ -70,7 +97,8 @@ class ChatRequest(BaseModel):
 
 # ── Endpoints ──────────────────────────────────────────────────────────
 @app.post("/ingest", response_model=IngestResponse)
-def ingest(req: IngestRequest):
+@limiter.limit("5/minute")
+def ingest(request: Request, req: IngestRequest):
     """Ingest one or more PDFs into the vector store."""
     paths = req.pdf_path if isinstance(req.pdf_path, list) else [req.pdf_path]
     total = 0
@@ -83,7 +111,8 @@ def ingest(req: IngestRequest):
 
 
 @app.post("/query", response_model=QueryResponse)
-def query(req: QueryRequest):
+@limiter.limit("10/minute")
+def query(request: Request, req: QueryRequest):
     """Query the RAG pipeline."""
     if pipeline.store.count() == 0:
         raise HTTPException(
@@ -95,7 +124,8 @@ def query(req: QueryRequest):
 
 
 @app.post("/chat")
-def chat(req: ChatRequest):
+@limiter.limit("10/minute")
+def chat(request: Request, req: ChatRequest):
     """Streaming chat endpoint — returns SSE stream of tokens."""
     if pipeline.store.count() == 0:
         raise HTTPException(
@@ -141,7 +171,8 @@ def chat(req: ChatRequest):
 
 
 @app.post("/evaluate")
-def evaluate(req: EvalRequest):
+@limiter.limit("3/minute")
+def evaluate(request: Request, req: EvalRequest):
     """Run evaluation against a golden dataset."""
     try:
         return pipeline.evaluate(req.golden_path, use_judge=req.use_judge)

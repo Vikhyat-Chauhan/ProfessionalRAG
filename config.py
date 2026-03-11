@@ -5,6 +5,7 @@ from pydantic import Field
 class Settings(BaseSettings):
     # API
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
+    api_key: str = Field(default="", alias="ProfessionalRAG_KEY")
 
     # Models
     llm_model: str = "claude-sonnet-4-6"
