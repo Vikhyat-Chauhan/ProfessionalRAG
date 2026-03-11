@@ -1,11 +1,15 @@
-"""Production monitoring — latency, token usage, cost tracking."""
+"""Production monitoring — latency, token usage, cost tracking.
+
+Logs structured JSON to stdout (captured by Cloud Logging on Cloud Run)
+and keeps an in-memory buffer for the /metrics summary endpoint.
+"""
 
 import json
 import logging
 import time
+from collections import deque
 from contextlib import contextmanager
-from dataclasses import dataclass, field
-from pathlib import Path
+from dataclasses import dataclass
 
 from config import settings
 
@@ -27,12 +31,12 @@ class QueryMetrics:
 
 
 class MetricsCollector:
-    """Collects per-query metrics and writes them to a JSONL log."""
+    """Collects per-query metrics, logs to stdout, keeps in-memory buffer."""
 
-    def __init__(self, log_path: str = "metrics_log.jsonl"):
-        self._log_path = Path(log_path)
+    def __init__(self, buffer_size: int = 200):
         self._current = QueryMetrics()
         self._timers: dict[str, float] = {}
+        self._history: deque[dict] = deque(maxlen=buffer_size)
 
     def start_query(self, query: str) -> None:
         self._current = QueryMetrics(query=query)
@@ -84,20 +88,13 @@ class MetricsCollector:
             "top_score": round(self._current.top_score, 4),
             "chunks": self._current.chunks_retrieved,
         }
-        with open(self._log_path, "a") as f:
-            f.write(json.dumps(entry) + "\n")
-        log.info(
-            "Query complete — %.0f ms total, $%.4f cost",
-            entry["total_ms"],
-            entry["cost_usd"],
-        )
+        # Structured JSON log → Cloud Logging picks this up automatically
+        log.info(json.dumps(entry))
+        self._history.append(entry)
 
     def summary(self, last_n: int = 50) -> dict:
-        """Aggregate stats from the last N logged queries."""
-        if not self._log_path.exists():
-            return {}
-        lines = self._log_path.read_text().strip().splitlines()
-        entries = [json.loads(l) for l in lines[-last_n:]]
+        """Aggregate stats from recent queries (in-memory buffer)."""
+        entries = list(self._history)[-last_n:]
         if not entries:
             return {}
         n = len(entries)

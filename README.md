@@ -49,7 +49,7 @@ Built from scratch — no LangChain, no LlamaIndex. Every component (chunker, em
 |  Hit@K / MRR     |                       |  Latency (ms)    |
 |  LLM-as-Judge    |                       |  Token Count     |
 |  Golden Datasets |                       |  Cost (USD)      |
-+------------------+                       |  JSONL Streaming |
++------------------+                       |  Cloud Logging   |
                                            +------------------+
 ```
 
@@ -94,7 +94,7 @@ Golden Dataset (Q/A/Pages) → Retrieval Metrics (Hit@K, MRR) → LLM-as-Judge (
 
 ## Metrics & Observability
 
-Every query produces a structured metrics record appended to `metrics_log.jsonl`:
+Every query emits a structured JSON log to stdout (auto-ingested by Cloud Logging on Cloud Run):
 
 ```json
 {
@@ -115,7 +115,7 @@ Every query produces a structured metrics record appended to `metrics_log.jsonl`
 - **Latency breakdown** — retrieval, reranking, and LLM generation timed independently via context manager instrumentation
 - **Token economics** — input/output tokens with configurable per-million-token cost rates
 - **Relevance signal** — top cross-encoder score as a retrieval quality proxy
-- **Persistent log** — append-only JSONL for trend analysis and regression detection
+- **Structured logging** — JSON to stdout, auto-captured by Cloud Logging on Cloud Run
 
 ---
 
@@ -126,7 +126,7 @@ Every query produces a structured metrics record appended to `metrics_log.jsonl`
 | **No LangChain / LlamaIndex** | Full control over every component — easier to debug, profile, and optimize |
 | **Two-stage retrieval** | Embedding search is fast but imprecise; cross-encoder reranking adds precision without the cost of reranking the entire corpus |
 | **SHA-256 fingerprint caching** | Avoids redundant embedding computation — critical when ingestion involves expensive model inference |
-| **JSONL metrics streaming** | Append-only, zero-contention logging — enables post-hoc analysis without impacting query latency |
+| **Structured JSON logging** | Metrics emitted to stdout as JSON — Cloud Logging ingests automatically, no file I/O on ephemeral containers |
 | **Pydantic Settings** | Type-safe, env-driven configuration with validation — no stringly-typed configs or missing key surprises |
 | **Context manager latency tracking** | `with metrics.track_latency("retrieval"):` — composable instrumentation that's impossible to forget to close |
 | **Lazy model loading** | Models load on first use, not at import — keeps tests fast and startup cheap |
@@ -145,7 +145,7 @@ Every query produces a structured metrics record appended to `metrics_log.jsonl`
 | **API** | FastAPI + Uvicorn | Async-ready, auto-generated OpenAPI docs, Pydantic integration |
 | **CLI** | Click | Clean subcommand interface with built-in help |
 | **Config** | Pydantic Settings + .env | Type-safe env var parsing with defaults and validation |
-| **Container** | Docker + Docker Compose | One-command deployment with persistent volume for ChromaDB |
+| **Deployment** | Docker + Google Cloud Run | Serverless containers, auto-scaling, zero infra management |
 
 ---
 
@@ -168,12 +168,11 @@ ProfessionalRAG/
 │   ├── golden.py               # Golden dataset eval (Hit@K, MRR)
 │   └── judge.py                # LLM-as-judge scoring (Faithfulness/Completeness/Conciseness)
 ├── monitoring/
-│   └── metrics.py              # Per-query latency, tokens, cost — JSONL streaming
+│   └── metrics.py              # Per-query latency, tokens, cost — structured JSON to stdout (Cloud Logging)
 ├── pipeline.py                 # Orchestrator: ingest → retrieve → rerank → generate → evaluate
 ├── config.py                   # Pydantic Settings (env-driven, type-safe)
 ├── cli.py                      # Click CLI (ingest, query, evaluate, stats, serve)
-├── Dockerfile                  # Production container (python:3.12-slim)
-├── docker-compose.yml          # One-command local deploy
+├── Dockerfile                  # Production container (python:3.12-slim, Cloud Run ready)
 └── golden_example.json         # Example evaluation dataset
 ```
 
@@ -235,12 +234,27 @@ python cli.py evaluate golden_example.json
 python cli.py stats --last 50
 ```
 
-### Docker
+### Deploy to Cloud Run
 
 ```bash
-docker compose up --build
-# API available at http://localhost:8000
-# Docs at http://localhost:8000/docs
+# Store secrets in GCP Secret Manager
+echo -n "sk-ant-..." | gcloud secrets create anthropic-key --data-file=-
+echo -n "pcsk_..."   | gcloud secrets create pinecone-key --data-file=-
+
+# Deploy from source (builds via Cloud Build automatically)
+gcloud run deploy professional-rag \
+  --source . \
+  --region us-central1 \
+  --port 8080 \
+  --cpu 2 \
+  --memory 4Gi \
+  --min-instances 1 \
+  --max-instances 3 \
+  --concurrency 4 \
+  --timeout 300 \
+  --no-cpu-throttling \
+  --set-secrets ANTHROPIC_API_KEY=anthropic-key:latest,PINECONE_API_KEY=pinecone-key:latest \
+  --allow-unauthenticated
 ```
 
 ---

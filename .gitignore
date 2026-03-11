@@ -9,4 +9,5 @@ dist/
 build/
 .pytest_cache/
 metrics_log.jsonl
-GCP_DEPLOYMENT_ROADMAP.md
+metrics_log.json
+.DS_Store

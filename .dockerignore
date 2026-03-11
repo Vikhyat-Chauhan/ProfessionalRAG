@@ -3,11 +3,13 @@ venv/
 __pycache__/
 *.pyc
 .env
-chroma_db/
-metrics_log.jsonl
 .git/
 *.egg-info/
 dist/
 build/
 .pytest_cache/
-Thesis.pdf
+.DS_Store
+pdfs/
+metrics_log.jsonl
+README.md
+LICENSE

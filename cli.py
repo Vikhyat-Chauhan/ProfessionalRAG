@@ -90,7 +90,7 @@ def stats(last: int):
 
 @cli.command()
 @click.option("--host", default="0.0.0.0")
-@click.option("--port", default=8000)
+@click.option("--port", default=8080)
 def serve(host: str, port: int):
     """Start the FastAPI server."""
     import uvicorn
