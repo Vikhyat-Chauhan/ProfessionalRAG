@@ -57,6 +57,29 @@ class LLMClient:
         )
         return answer
 
+    def generate_stream(
+        self,
+        query: str,
+        context_blocks: list[tuple[str, dict]],
+    ):
+        """Yield text chunks as they arrive from Claude (streaming)."""
+        prompt = self._build_prompt(query, context_blocks)
+
+        with self.client.messages.stream(
+            model=settings.llm_model,
+            max_tokens=settings.llm_max_tokens,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": prompt}],
+        ) as stream:
+            for text in stream.text_stream:
+                yield text
+
+            response = stream.get_final_message()
+            metrics.record_tokens(
+                response.usage.input_tokens,
+                response.usage.output_tokens,
+            )
+
     @staticmethod
     def _build_prompt(query: str, context_blocks: list[tuple[str, dict]]) -> str:
         parts = []
