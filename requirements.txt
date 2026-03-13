@@ -15,3 +15,5 @@ Pillow>=10.0.0
 pytesseract>=0.3.10
 requests>=2.31.0
 beautifulsoup4>=4.12.0
+# Visit tracking (Firestore)
+google-cloud-firestore>=2.16.0

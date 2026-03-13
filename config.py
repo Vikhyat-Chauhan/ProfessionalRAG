@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     cost_per_m_input_tokens: float = 3.0
     cost_per_m_output_tokens: float = 15.0
 
+    # Firestore (visit tracking)
+    gcp_project: str = Field(default="", alias="GCP_PROJECT")
+    firestore_collection: str = "visits"
+
     # API server
     api_host: str = "0.0.0.0"
     api_port: int = 8080

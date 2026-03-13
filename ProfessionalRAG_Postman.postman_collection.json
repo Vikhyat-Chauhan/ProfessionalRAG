@@ -1,0 +1,470 @@
+{
+  "info": {
+    "_postman_id": "professional-rag-api",
+    "name": "ProfessionalRAG API",
+    "description": "Production-grade Retrieval-Augmented Generation REST API with two-stage retrieval, LLM-as-judge evaluation, and per-query cost observability.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health & Status",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "No authentication required. Returns server status and collection count."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/health",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "health"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"status\": \"ok\",\n  \"collection_count\": 42\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Metrics",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{api_key}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/metrics",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "metrics"
+              ]
+            },
+            "description": "Return aggregated metrics from recent queries."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{api_key}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/metrics",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "metrics"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"total_latency_ms\": 245.3,\n  \"cost_usd\": 0.00234\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Document Ingestion",
+      "item": [
+        {
+          "name": "Ingest Documents",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"source\": \"document.pdf\",\n  \"force\": false\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/ingest",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "ingest"
+              ]
+            },
+            "description": "Ingest one or more sources (PDF, DOCX, PPTX, CSV, JSON, text, image, URL, GitHub repo).\n\nRate limit: 5 requests/minute\n\nSupported source types:\n- File paths (local): \"document.pdf\", \"file.docx\"\n- URLs: \"https://example.com/document.pdf\"\n- GitHub repos: \"https://github.com/owner/repo\"\n- Multiple sources: [\"file1.pdf\", \"file2.pdf\"]"
+          },
+          "response": [
+            {
+              "name": "200 OK - Single Source",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{api_key}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"source\": \"document.pdf\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/ingest",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "ingest"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"chunks\": 42,\n  \"message\": \"Ingested 42 chunks from 1 source(s)\"\n}"
+            },
+            {
+              "name": "200 OK - Multiple Sources",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{api_key}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"source\": [\"file1.pdf\", \"file2.pdf\"]\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/ingest",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "ingest"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"chunks\": 85,\n  \"message\": \"Ingested 85 chunks from 2 source(s)\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Querying & Chat",
+      "item": [
+        {
+          "name": "Query (Non-Streaming)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"question\": \"What is RAG?\",\n  \"top_k\": 5\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/query",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "query"
+              ]
+            },
+            "description": "Query the RAG pipeline and get answer with sources.\n\nRate limit: 10 requests/minute\n\nParameters:\n- question (required): The query to answer\n- top_k (optional): Number of top sources to retrieve (default: 5)"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{api_key}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"question\": \"What is RAG?\",\n  \"top_k\": 5\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/query",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "query"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"answer\": \"RAG is Retrieval-Augmented Generation, a technique that combines information retrieval with language model generation...\",\n  \"sources\": [\n    {\n      \"page\": \"1\",\n      \"score\": 0.8234,\n      \"text\": \"RAG is a technique that enhances language models by retrieving relevant documents...\"\n    },\n    {\n      \"page\": \"3\",\n      \"score\": 0.7891,\n      \"text\": \"Retrieval-Augmented Generation combines two stages of processing...\"\n    }\n  ],\n  \"metrics\": {\n    \"total_ms\": 245.3,\n    \"llm_ms\": 120.5,\n    \"cost_usd\": 0.00234,\n    \"top_score\": 0.8234\n  }\n}"
+            },
+            {
+              "name": "400 Bad Request - No Documents",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{api_key}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"question\": \"What is RAG?\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/query",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "query"
+                  ]
+                }
+              },
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{\n  \"detail\": \"No documents ingested. POST /ingest first.\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Chat (Streaming SSE)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Explain RAG in detail\",\n  \"top_k\": 5\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/chat",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "chat"
+              ]
+            },
+            "description": "Streaming chat endpoint that returns Server-Sent Events (SSE) stream of tokens.\n\nRate limit: 10 requests/minute\n\nResponse format (SSE):\n1. Sources event: {\"type\": \"sources\", \"sources\": [...]}\n2. Token events (multiple): {\"type\": \"token\", \"token\": \"word\"}\n3. Done event: {\"type\": \"done\", \"metrics\": {...}}\n\nTo test streaming in Postman:\n1. Send the request\n2. Look at the response body to see SSE events"
+          },
+          "response": [
+            {
+              "name": "200 OK - Streaming Response",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{api_key}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"message\": \"Explain RAG\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/chat",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "chat"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "body": "data: {\"type\": \"sources\", \"sources\": [{\"page\": \"1\", \"score\": 0.8234, \"text\": \"RAG is...\"}]}\n\ndata: {\"type\": \"token\", \"token\": \"RAG\"}\n\ndata: {\"type\": \"token\", \"token\": \" is\"}\n\ndata: {\"type\": \"token\", \"token\": \" Retrieval\"}\n\ndata: {\"type\": \"done\", \"metrics\": {\"total_ms\": 245.3, \"cost_usd\": 0.00234, \"top_score\": 0.8234}}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Evaluation",
+      "item": [
+        {
+          "name": "Run Evaluation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"golden_path\": \"golden_example.json\",\n  \"use_judge\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/evaluate",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "evaluate"
+              ]
+            },
+            "description": "Run evaluation against a golden dataset.\n\nRate limit: 3 requests/minute\n\nParameters:\n- golden_path (required): Path to golden dataset JSON file\n- use_judge (optional): Enable LLM-as-judge scoring (default: true)\n\nGolden dataset format:\n[\n  {\n    \"question\": \"What is RAG?\",\n    \"expected_pages\": [1, 2],\n    \"expected_answer\": \"RAG is...\"\n  }\n]"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{api_key}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"golden_path\": \"golden_example.json\",\n  \"use_judge\": true\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/evaluate",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "evaluate"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"hit_at_k\": 0.95,\n  \"mrr\": 0.87,\n  \"judge_scores\": {\n    \"faithfulness\": 4.2,\n    \"completeness\": 4.1,\n    \"conciseness\": 4.0\n  }\n}"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "api_key",
+      "value": "your-api-key-here",
+      "type": "string"
+    }
+  ]
+}

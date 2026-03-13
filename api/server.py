@@ -2,14 +2,17 @@
 
 import json
 import logging
+from datetime import datetime, timezone
+from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from google.cloud import firestore
 
 from pipeline import RAGPipeline
 from monitoring.metrics import metrics
@@ -38,6 +41,7 @@ app.add_middleware(
 )
 
 pipeline = RAGPipeline()
+db = firestore.Client(project=settings.gcp_project or None)
 
 
 @app.middleware("http")
@@ -94,6 +98,16 @@ class EvalRequest(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     top_k: int = 5
+
+
+class TrackRequest(BaseModel):
+    page: str = "/"
+    referrer: str = "direct"
+    source: Optional[str] = None
+    utm_source: Optional[str] = None
+    utm_medium: Optional[str] = None
+    utm_campaign: Optional[str] = None
+    ref: Optional[str] = None
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────
@@ -195,4 +209,65 @@ def health():
     return {
         "status": "ok",
         "collection_count": pipeline.store.count(),
+    }
+
+
+# ── Visit tracking ───────────────────────────────────────────────────
+@app.post("/track", status_code=204)
+@limiter.limit("30/minute")
+async def track_visit(request: Request, req: TrackRequest):
+    """Record a page visit with source attribution."""
+    source = req.utm_source or req.ref or req.source or "direct"
+
+    doc = {
+        "page": req.page,
+        "referrer": req.referrer,
+        "source": source,
+        "utm_source": req.utm_source,
+        "utm_medium": req.utm_medium,
+        "utm_campaign": req.utm_campaign,
+        "ref": req.ref,
+        "timestamp": datetime.now(timezone.utc),
+        "ip": request.headers.get("x-forwarded-for", request.client.host if request.client else "unknown"),
+    }
+
+    db.collection(settings.firestore_collection).add(doc)
+
+
+@app.get("/visits")
+@limiter.limit("10/minute")
+def get_visits(
+    request: Request,
+    days: int = Query(default=30, ge=1, le=365),
+    source: Optional[str] = Query(default=None),
+):
+    """Return visit analytics: total count, per-source breakdown, and per-page breakdown."""
+    from datetime import timedelta
+
+    col = db.collection(settings.firestore_collection)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+    query = col.where("timestamp", ">=", cutoff)
+    if source:
+        query = query.where("source", "==", source)
+
+    docs = query.stream()
+
+    total = 0
+    by_source: dict[str, int] = {}
+    by_page: dict[str, int] = {}
+
+    for doc in docs:
+        d = doc.to_dict()
+        total += 1
+        src = d.get("source", "direct")
+        by_source[src] = by_source.get(src, 0) + 1
+        pg = d.get("page", "/")
+        by_page[pg] = by_page.get(pg, 0) + 1
+
+    return {
+        "days": days,
+        "total": total,
+        "by_source": dict(sorted(by_source.items(), key=lambda x: x[1], reverse=True)),
+        "by_page": dict(sorted(by_page.items(), key=lambda x: x[1], reverse=True)),
     }
