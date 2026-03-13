@@ -453,6 +453,348 @@
           ]
         }
       ]
+    },
+    {
+      "name": "Analytics & Visit Tracking",
+      "item": [
+        {
+          "name": "Track Visit - Pageview",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event\": \"pageview\",\n  \"page\": \"/\",\n  \"referrer\": \"https://google.com\",\n  \"utm_source\": \"google\",\n  \"utm_medium\": \"organic\",\n  \"screen_width\": 1920,\n  \"screen_height\": 1080,\n  \"viewport_width\": 1440,\n  \"viewport_height\": 900,\n  \"device_type\": \"desktop\",\n  \"language\": \"en-US\",\n  \"theme\": \"dark\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/track",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "track"
+              ]
+            },
+            "description": "Record a pageview event with source attribution and device info.\n\nRate limit: 30 requests/minute\nReturns: 204 No Content on success\n\nSource is automatically derived from utm_source, ref, source, or defaults to \"direct\"."
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{api_key}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"event\": \"pageview\",\n  \"page\": \"/\"\n}"
+                },
+                "url": {
+                  "raw": "{{base_url}}/track",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "track"
+                  ]
+                }
+              },
+              "status": "No Content",
+              "code": 204,
+              "body": ""
+            }
+          ]
+        },
+        {
+          "name": "Track Visit - Tab Click",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event\": \"tab_click\",\n  \"page\": \"/\",\n  \"tab\": \"projects\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/track",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "track"
+              ]
+            },
+            "description": "Record a tab click event.\n\nRate limit: 30 requests/minute"
+          },
+          "response": []
+        },
+        {
+          "name": "Track Visit - Outbound Click",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event\": \"outbound_click\",\n  \"page\": \"/\",\n  \"url\": \"https://github.com/vikhyatchauhan\",\n  \"hostname\": \"github.com\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/track",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "track"
+              ]
+            },
+            "description": "Record an outbound link click.\n\nRate limit: 30 requests/minute"
+          },
+          "response": []
+        },
+        {
+          "name": "Track Visit - Resume Download",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event\": \"resume_download\",\n  \"page\": \"/\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/track",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "track"
+              ]
+            },
+            "description": "Record a resume file download event.\n\nRate limit: 30 requests/minute"
+          },
+          "response": []
+        },
+        {
+          "name": "Track Visit - Chat Message",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event\": \"chat_message\",\n  \"page\": \"/chat\",\n  \"question\": \"What is your experience with Python?\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/track",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "track"
+              ]
+            },
+            "description": "Record a chat interaction event.\n\nRate limit: 30 requests/minute"
+          },
+          "response": []
+        },
+        {
+          "name": "Track Visit - Time on Site",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{api_key}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event\": \"time_on_site\",\n  \"page\": \"/\",\n  \"seconds\": 120\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/track",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "track"
+              ]
+            },
+            "description": "Record session duration when user leaves the site.\n\nRate limit: 30 requests/minute"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Visit Analytics",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{api_key}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/visits?days=30",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "visits"
+              ],
+              "query": [
+                {
+                  "key": "days",
+                  "value": "30",
+                  "description": "Time window in days (1-365, default: 30)"
+                },
+                {
+                  "key": "source",
+                  "value": "",
+                  "description": "Filter by traffic source (e.g., google, linkedin, direct)",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Return aggregated visit analytics with event breakdowns.\n\nRate limit: 10 requests/minute\n\nQuery parameters:\n- days (optional): Time window 1-365 days (default: 30)\n- source (optional): Filter by traffic source\n\nReturns:\n- pageviews: Total pageview count\n- events: Breakdown by event type\n- by_source: Traffic source attribution\n- by_page: Page-level traffic\n- by_device: Device type breakdown\n- by_tab: Tab click analytics\n- outbound_clicks: External link tracking\n- resume_downloads: Download count\n- chat_messages: Chat interaction count\n- avg_time_on_site_seconds: Average session duration"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{api_key}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/visits?days=30",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "visits"
+                  ],
+                  "query": [
+                    {
+                      "key": "days",
+                      "value": "30"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"days\": 30,\n  \"pageviews\": 142,\n  \"events\": {\n    \"pageview\": 142,\n    \"tab_click\": 87,\n    \"outbound_click\": 23,\n    \"chat_message\": 15,\n    \"time_on_site\": 98,\n    \"resume_download\": 8\n  },\n  \"by_source\": {\n    \"direct\": 65,\n    \"google\": 42,\n    \"linkedin\": 25,\n    \"github\": 10\n  },\n  \"by_page\": {\n    \"/\": 120,\n    \"/chat\": 22\n  },\n  \"by_device\": {\n    \"desktop\": 95,\n    \"mobile\": 40,\n    \"tablet\": 7\n  },\n  \"by_tab\": {\n    \"projects\": 35,\n    \"experience\": 28,\n    \"skills\": 24\n  },\n  \"outbound_clicks\": {\n    \"github.com\": 15,\n    \"linkedin.com\": 8\n  },\n  \"resume_downloads\": 8,\n  \"chat_messages\": 15,\n  \"avg_time_on_site_seconds\": 94\n}"
+            },
+            {
+              "name": "200 OK - Filtered by Source",
+              "originalRequest": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{api_key}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/visits?days=7&source=google",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "visits"
+                  ],
+                  "query": [
+                    {
+                      "key": "days",
+                      "value": "7"
+                    },
+                    {
+                      "key": "source",
+                      "value": "google"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"days\": 7,\n  \"pageviews\": 12,\n  \"events\": {\n    \"pageview\": 12\n  },\n  \"by_source\": {\n    \"google\": 12\n  },\n  \"by_page\": {\n    \"/\": 10,\n    \"/chat\": 2\n  },\n  \"by_device\": {\n    \"desktop\": 8,\n    \"mobile\": 4\n  },\n  \"by_tab\": {},\n  \"outbound_clicks\": {},\n  \"resume_downloads\": 0,\n  \"chat_messages\": 0,\n  \"avg_time_on_site_seconds\": 0\n}"
+            }
+          ]
+        }
+      ]
     }
   ],
   "variable": [
