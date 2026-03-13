@@ -109,6 +109,7 @@ class ChatRequest(BaseModel):
 
 
 class TrackRequest(BaseModel):
+    event: str = "pageview"
     page: str = "/"
     referrer: str = "direct"
     source: Optional[str] = None
@@ -116,6 +117,23 @@ class TrackRequest(BaseModel):
     utm_medium: Optional[str] = None
     utm_campaign: Optional[str] = None
     ref: Optional[str] = None
+    # Device info (pageview)
+    screen_width: Optional[int] = None
+    screen_height: Optional[int] = None
+    viewport_width: Optional[int] = None
+    viewport_height: Optional[int] = None
+    device_type: Optional[str] = None
+    language: Optional[str] = None
+    theme: Optional[str] = None
+    # Tab click
+    tab: Optional[str] = None
+    # Outbound click
+    url: Optional[str] = None
+    hostname: Optional[str] = None
+    # Chat message
+    question: Optional[str] = None
+    # Time on site
+    seconds: Optional[int] = None
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────
@@ -224,20 +242,20 @@ def health():
 @app.post("/track", status_code=204)
 @limiter.limit("30/minute")
 async def track_visit(request: Request, req: TrackRequest):
-    """Record a page visit with source attribution."""
-    source = req.utm_source or req.ref or req.source or "direct"
-
-    doc = {
-        "page": req.page,
-        "referrer": req.referrer,
-        "source": source,
-        "utm_source": req.utm_source,
-        "utm_medium": req.utm_medium,
-        "utm_campaign": req.utm_campaign,
-        "ref": req.ref,
+    """Record a visit event with source attribution and device info."""
+    doc: dict = {
+        "event": req.event,
         "timestamp": datetime.now(timezone.utc),
         "ip": request.headers.get("x-forwarded-for", request.client.host if request.client else "unknown"),
     }
+
+    # Strip None values — only store fields that are set
+    fields = req.model_dump(exclude={"event"}, exclude_none=True)
+    doc.update(fields)
+
+    # Derive source for pageview events
+    if req.event == "pageview":
+        doc["source"] = req.utm_source or req.ref or req.source or "direct"
 
     get_db().collection(settings.firestore_collection).add(doc)
 
@@ -249,33 +267,71 @@ def get_visits(
     days: int = Query(default=30, ge=1, le=365),
     source: Optional[str] = Query(default=None),
 ):
-    """Return visit analytics: total count, per-source breakdown, and per-page breakdown."""
+    """Return visit analytics with event breakdowns."""
     from datetime import timedelta
 
     col = get_db().collection(settings.firestore_collection)
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
-    query = col.where("timestamp", ">=", cutoff)
+    q = col.where("timestamp", ">=", cutoff)
     if source:
-        query = query.where("source", "==", source)
+        q = q.where("source", "==", source)
 
-    docs = query.stream()
+    docs = q.stream()
 
-    total = 0
+    by_event: dict[str, int] = {}
     by_source: dict[str, int] = {}
     by_page: dict[str, int] = {}
+    by_device: dict[str, int] = {}
+    by_tab: dict[str, int] = {}
+    outbound_clicks: dict[str, int] = {}
+    resume_downloads = 0
+    chat_messages = 0
+    time_on_site_samples: list[int] = []
 
     for doc in docs:
         d = doc.to_dict()
-        total += 1
-        src = d.get("source", "direct")
-        by_source[src] = by_source.get(src, 0) + 1
-        pg = d.get("page", "/")
-        by_page[pg] = by_page.get(pg, 0) + 1
+        event = d.get("event", "pageview")
+        by_event[event] = by_event.get(event, 0) + 1
+
+        if event == "pageview":
+            src = d.get("source", "direct")
+            by_source[src] = by_source.get(src, 0) + 1
+            pg = d.get("page", "/")
+            by_page[pg] = by_page.get(pg, 0) + 1
+            dt = d.get("device_type")
+            if dt:
+                by_device[dt] = by_device.get(dt, 0) + 1
+        elif event == "tab_click":
+            tab = d.get("tab", "unknown")
+            by_tab[tab] = by_tab.get(tab, 0) + 1
+        elif event == "outbound_click":
+            hostname = d.get("hostname", "unknown")
+            outbound_clicks[hostname] = outbound_clicks.get(hostname, 0) + 1
+        elif event == "resume_download":
+            resume_downloads += 1
+        elif event == "chat_message":
+            chat_messages += 1
+        elif event == "time_on_site":
+            secs = d.get("seconds")
+            if secs:
+                time_on_site_samples.append(secs)
+
+    avg_time = round(sum(time_on_site_samples) / len(time_on_site_samples)) if time_on_site_samples else 0
+
+    def _sorted(d: dict) -> dict:
+        return dict(sorted(d.items(), key=lambda x: x[1], reverse=True))
 
     return {
         "days": days,
-        "total": total,
-        "by_source": dict(sorted(by_source.items(), key=lambda x: x[1], reverse=True)),
-        "by_page": dict(sorted(by_page.items(), key=lambda x: x[1], reverse=True)),
+        "pageviews": by_event.get("pageview", 0),
+        "events": _sorted(by_event),
+        "by_source": _sorted(by_source),
+        "by_page": _sorted(by_page),
+        "by_device": _sorted(by_device),
+        "by_tab": _sorted(by_tab),
+        "outbound_clicks": _sorted(outbound_clicks),
+        "resume_downloads": resume_downloads,
+        "chat_messages": chat_messages,
+        "avg_time_on_site_seconds": avg_time,
     }
