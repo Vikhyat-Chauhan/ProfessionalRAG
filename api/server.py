@@ -41,7 +41,15 @@ app.add_middleware(
 )
 
 pipeline = RAGPipeline()
-db = firestore.Client(project=settings.gcp_project or None)
+
+_db: firestore.Client | None = None
+
+def get_db() -> firestore.Client:
+    """Lazy Firestore client — created on first use."""
+    global _db
+    if _db is None:
+        _db = firestore.Client(project=settings.gcp_project or None)
+    return _db
 
 
 @app.middleware("http")
@@ -231,7 +239,7 @@ async def track_visit(request: Request, req: TrackRequest):
         "ip": request.headers.get("x-forwarded-for", request.client.host if request.client else "unknown"),
     }
 
-    db.collection(settings.firestore_collection).add(doc)
+    get_db().collection(settings.firestore_collection).add(doc)
 
 
 @app.get("/visits")
@@ -244,7 +252,7 @@ def get_visits(
     """Return visit analytics: total count, per-source breakdown, and per-page breakdown."""
     from datetime import timedelta
 
-    col = db.collection(settings.firestore_collection)
+    col = get_db().collection(settings.firestore_collection)
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
     query = col.where("timestamp", ">=", cutoff)
