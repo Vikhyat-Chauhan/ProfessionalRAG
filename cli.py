@@ -68,11 +68,18 @@ def evaluate(golden_path: str, no_judge: bool):
 
     click.echo("\n── Per-question results ──")
     for r in results["results"]:
+        ret = r["retrieval"]
+        jdg = r["judge"]
+        hit5 = ret["hit_at_k"].get(5, ret["hit_at_k"].get("5", "?"))
         click.echo(
             f"  Q: {r['question'][:80]}\n"
-            f"    Hit: {r['hit']}  MRR: {r['mrr']:.2f}  "
-            f"Judge: {r['judge_score']}/5"
+            f"    Hit@5: {hit5}  MRR: {ret['mrr']:.3f}  "
+            f"NDCG@5: {ret['ndcg_at_k'].get(5, ret['ndcg_at_k'].get('5', 0)):.3f}  "
+            f"Judge: {jdg['overall']}/5 "
+            f"(F:{jdg['faithfulness']} C:{jdg['completeness']} S:{jdg['conciseness']})"
         )
+        if jdg.get("reasoning"):
+            click.echo(f"    Reason: {jdg['reasoning']}")
 
     click.echo(f"\n── Aggregate ──\n{json.dumps(results['aggregate'], indent=2)}")
 

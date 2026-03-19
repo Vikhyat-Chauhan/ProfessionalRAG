@@ -93,16 +93,21 @@ class RAGPipeline:
     def evaluate(
         self, golden_path: str, use_judge: bool = True
     ) -> dict:
-        """Run evaluation against a golden dataset."""
-        from evaluation.golden import GoldenDataset, EvalResult
+        """Run evaluation against a golden dataset.
+
+        For each question: retrieve → rerank → generate → compute retrieval
+        metrics (Hit@K, MRR, NDCG@K, Precision@K, Recall@K) → optionally
+        score with LLM-as-judge (faithfulness, completeness, conciseness).
+        """
+        from evaluation.golden import GoldenDataset, EvalResult, RetrievalMetrics, JudgeScores
         from evaluation.judge import LLMJudge
 
         dataset = GoldenDataset(golden_path)
         judge = LLMJudge() if use_judge else None
         results: list[EvalResult] = []
 
-        for item in dataset.items:
-            log.info("Evaluating: %s", item.question)
+        for i, item in enumerate(dataset.items, 1):
+            log.info("Evaluating [%d/%d]: %s", i, len(dataset.items), item.question)
 
             query_vec = self.embedder.embed_query(item.question)
             chunks, metas = self.store.query(query_vec)
@@ -111,8 +116,9 @@ class RAGPipeline:
             context = [(c, m) for c, m, _ in ranked]
             answer = self.llm.generate(item.question, context)
 
+            # Retrieval metrics
             retrieved_metas = [m for _, m, _ in ranked]
-            hit, mrr = GoldenDataset.compute_retrieval_metrics(
+            retrieval = GoldenDataset.compute_retrieval_metrics(
                 item.expected_pages, retrieved_metas
             )
 
@@ -120,16 +126,23 @@ class RAGPipeline:
                 question=item.question,
                 answer=answer,
                 expected_answer=item.expected_answer,
-                hit_at_k=hit,
-                mrr=mrr,
+                retrieval=retrieval,
             )
 
+            # LLM-as-judge scoring (context-aware)
             if judge:
-                score, reasoning = judge.score(
-                    item.question, item.expected_answer, answer
+                context_chunks = [c for c, _, _ in ranked]
+                scores = judge.score(
+                    item.question, item.expected_answer, answer,
+                    context_chunks=context_chunks,
                 )
-                result.judge_score = score
-                result.judge_reasoning = reasoning
+                result.judge = JudgeScores(
+                    overall=scores["overall"],
+                    faithfulness=scores["faithfulness"],
+                    completeness=scores["completeness"],
+                    conciseness=scores["conciseness"],
+                    reasoning=scores["reasoning"],
+                )
 
             results.append(result)
 
@@ -138,10 +151,22 @@ class RAGPipeline:
                 {
                     "question": r.question,
                     "answer": r.answer,
-                    "hit": r.hit_at_k,
-                    "mrr": r.mrr,
-                    "judge_score": r.judge_score,
-                    "judge_reasoning": r.judge_reasoning,
+                    "expected_answer": r.expected_answer,
+                    "retrieval": {
+                        "hit_at_k": r.retrieval.hit_at_k,
+                        "mrr": r.retrieval.mrr,
+                        "ndcg_at_k": r.retrieval.ndcg_at_k,
+                        "precision_at_k": r.retrieval.precision_at_k,
+                        "recall_at_k": r.retrieval.recall_at_k,
+                        "retrieved_pages": r.retrieval.retrieved_pages,
+                    },
+                    "judge": {
+                        "overall": r.judge.overall,
+                        "faithfulness": r.judge.faithfulness,
+                        "completeness": r.judge.completeness,
+                        "conciseness": r.judge.conciseness,
+                        "reasoning": r.judge.reasoning,
+                    },
                 }
                 for r in results
             ],

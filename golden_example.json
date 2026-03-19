@@ -8,5 +8,20 @@
         "question": "What methodology was used?",
         "expected_answer": "The research methodology is described in the methods section.",
         "expected_pages": [3, 4, 5]
+    },
+    {
+        "question": "What were the key findings or results?",
+        "expected_answer": "The key findings are presented in the results section with supporting data.",
+        "expected_pages": [6, 7, 8]
+    },
+    {
+        "question": "What limitations are acknowledged?",
+        "expected_answer": "The authors acknowledge limitations including scope constraints and data availability.",
+        "expected_pages": [9, 10]
+    },
+    {
+        "question": "What future work is proposed?",
+        "expected_answer": "Future work includes extending the study scope and addressing identified gaps.",
+        "expected_pages": [10, 11]
     }
 ]
