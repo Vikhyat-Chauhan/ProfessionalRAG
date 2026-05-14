@@ -11,7 +11,9 @@ RUN apt-get update && \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# CPU-only torch — avoids ~3GB of CUDA wheels that sentence-transformers would otherwise pull
+RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch && \
+    pip install --no-cache-dir -r requirements.txt
 
 # Pre-download models at build time — NOT at runtime
 # This bakes the weights into the image so cold start is instant
