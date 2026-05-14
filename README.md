@@ -1,284 +1,170 @@
 # ProfessionalRAG
 
-**Production-grade Retrieval-Augmented Generation system with two-stage retrieval, LLM-as-judge evaluation, and per-query cost observability.**
+> Production-grade Retrieval-Augmented Generation pipeline with two-stage retrieval, LLM-as-judge evaluation, per-query cost telemetry, and a streaming chat API — built from scratch, no LangChain or LlamaIndex.
 
-Built from scratch — no LangChain, no LlamaIndex. Every component (chunker, embedder, reranker, vector store, evaluator, metrics collector) is hand-written with clear separation of concerns.
+**Live demo:** [vikhyatchauhan.com/chat](https://vikhyatchauhan.com/chat)
 
----
-
-## Why This Project Stands Out
-
-| What | How |
-|---|---|
-| **Two-stage retrieval** | Embedding recall (50 candidates) + cross-encoder reranking (top-k precision) — the same pattern used in production search systems at scale |
-| **Zero-dependency chunker** | Recursive character splitter with configurable separator hierarchy and overlap — no framework lock-in |
-| **SHA-256 cache invalidation** | Fingerprint-based skip logic prevents redundant embedding computation on unchanged documents |
-| **LLM-as-judge evaluation** | Automated answer quality scoring (1-5) across Faithfulness, Completeness, and Conciseness — not just vibes |
-| **Per-query cost instrumentation** | Every query logs latency breakdown, token counts, and USD cost to a JSONL stream — production observability from day one |
-| **Lazy model loading** | Embedder and reranker initialize on first use, not at import — fast cold starts, testable without GPU |
-| **Clean architecture** | Ingestion / Retrieval / Generation / Evaluation / Monitoring — each layer is independently testable and swappable |
+![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)
+![Claude](https://img.shields.io/badge/Claude-Sonnet_4.6-D97757?logo=anthropic&logoColor=white)
+![Pinecone](https://img.shields.io/badge/Pinecone-Serverless-1F1F1F?logo=pinecone&logoColor=white)
+![DynamoDB](https://img.shields.io/badge/DynamoDB-Visits-4053D6?logo=amazondynamodb&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-EC2-2496ED?logo=docker&logoColor=white)
+![pytest](https://img.shields.io/badge/pytest-18_tests-0A9EDC?logo=pytest&logoColor=white)
+![License](https://img.shields.io/badge/license-MIT-green)
 
 ---
 
 ## Architecture
 
+```mermaid
+flowchart TB
+    Client["Browser / CLI"] -->|Bearer auth| API["FastAPI /chat /query /ingest /track /visits"]
+    API --> Pipeline["RAG Pipeline (Orchestrator)"]
+
+    subgraph Ingest [Ingestion]
+        Reader["Reader<br/>PDF · DOCX · PPTX · CSV · JSON · URL · repo · image (OCR)"]
+        Chunker["Recursive Chunker<br/>1200 char · 200 overlap"]
+        Fingerprint["SHA-256 Fingerprint Cache"]
+    end
+
+    subgraph Retrieve [Two-Stage Retrieval]
+        Embedder["BGE-base-en-v1.5<br/>768-dim"]
+        Store[("Pinecone<br/>Serverless ANN")]
+        Reranker["Cross-Encoder<br/>ms-marco-MiniLM-L-6-v2"]
+    end
+
+    subgraph Gen [Generation]
+        LLM["Claude Sonnet 4.6<br/>streaming SSE"]
+    end
+
+    subgraph Obs [Observability]
+        Metrics["Per-query metrics<br/>latency · tokens · USD"]
+        Visits[("DynamoDB<br/>professionalrag-visits")]
+    end
+
+    Pipeline --> Ingest
+    Pipeline --> Retrieve
+    Pipeline --> Gen
+    API --> Visits
+    Pipeline --> Metrics
+
+    Reader --> Fingerprint --> Chunker --> Embedder --> Store
+    Embedder -->|query| Store -->|50 candidates| Reranker -->|top-5| LLM --> Client
 ```
-                          +-----------+
-                          |  CLI / API |
-                          +-----+-----+
-                                |
-                     +----------v----------+
-                     |    RAG Pipeline      |
-                     |    (Orchestrator)    |
-                     +----------+----------+
-                                |
-          +---------------------+---------------------+
-          |                     |                     |
-+---------v--------+  +---------v--------+  +---------v--------+
-|    Ingestion     |  |    Retrieval     |  |   Generation     |
-|  PDF + GitHub    |  |  BGE Embedder   |  |  Claude LLM      |
-|  Recursive       |  |  Pinecone Store |  |  Token + Cost    |
-|  Chunker         |  |  Cross-Encoder  |  |  Tracking        |
-|  SHA-256 Cache   |  |  Reranker       |  |                  |
-+------------------+  +------------------+  +------------------+
-                                |
-          +---------------------+---------------------+
-          |                                           |
-+---------v--------+                       +---------v--------+
-|   Evaluation     |                       |   Monitoring     |
-|  Hit@K / MRR     |                       |  Latency (ms)    |
-|  LLM-as-Judge    |                       |  Token Count     |
-|  Golden Datasets |                       |  Cost (USD)      |
-+------------------+                       |  Cloud Logging   |
-                                           +------------------+
+
+**Pattern:** retrieve 50 candidates via ANN → rerank with a cross-encoder → ground Claude on the top-5 → stream tokens over SSE. Same shape used in production search at Google, Bing, and Cohere.
+
+---
+
+## Quick Start (≤ 60 seconds)
+
+```bash
+git clone https://github.com/vikhyatchauhan/ProfessionalRAG && cd ProfessionalRAG
+python -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env   # add ANTHROPIC_API_KEY, PINECONE_API_KEY, ProfessionalRAG_KEY
+
+python cli.py ingest README.md           # ingest anything: pdf, docx, url, repo
+python cli.py query "what does this repo do?"
+python cli.py serve                      # FastAPI on :8080
+```
+
+**Run the test suite:**
+```bash
+pip install -r requirements-dev.txt && pytest      # 18 tests, ~3s, no network
+```
+
+**Deploy to EC2:**
+```bash
+docker build -t professional-rag .
+docker run -d -p 8080:8080 --env-file .env professional-rag
+# IAM role on the EC2 instance needs: dynamodb:CreateTable, PutItem, Scan, ListTables
 ```
 
 ---
 
-## How It Works
+## Results
 
-### 1. Ingestion
-```
-PDF / GitHub Repo → Page Extraction → SHA-256 Fingerprint → Recursive Chunking → BGE Embedding → ChromaDB
-```
-- Reads PDFs page-by-page or clones GitHub repos and reads source files
-- SHA-256 fingerprint check skips re-ingestion if the source hasn't changed
-- Recursive character splitter (500 chars, 50 overlap) with separator priority: `\n\n` → `\n` → `. ` → ` ` → `""`
-- Chunks are tagged with a source identifier for per-source cache invalidation
+Measured over 10 production queries against a 5,144-chunk PDF corpus (`metrics_log.jsonl`):
 
-### 2. Retrieval (Two-Stage)
-```
-Query → BGE Embedding → Pinecone ANN Search (50 candidates) → Cross-Encoder Rerank → Top-K Results
-```
-- **Stage 1:** Fast approximate nearest neighbor search retrieves 50 candidates
-- **Stage 2:** Cross-encoder (`ms-marco-MiniLM-L-6-v2`) scores each query-chunk pair for precision reranking
-- This retrieve-then-rerank pattern balances recall and relevance — the same approach used in production search at Google, Bing, and Cohere
+| Metric | Median | Mean | Notes |
+|---|---:|---:|---|
+| Total latency | **9.3 s** | 12.1 s | end-to-end, including LLM generation |
+| Retrieval (ANN) | **270 ms** | 462 ms | 50 candidates from Pinecone |
+| Reranking | **2.0 s** | 6.0 s | cross-encoder on 50×query pairs |
+| Cost per query | **$0.006** | $0.005 | Sonnet 4.6 at $3/$15 per M tokens |
+| Input tokens | 545 | 603 | grounded context (top-5 chunks) |
+| Output tokens | 257 | 226 | answer + citations |
+| Test suite | — | **3.3 s** | 18 tests, 0 network calls |
+| Container cold start | — | **~5 s** | models pre-baked into image (~500 MB) |
 
-### 3. Generation
-```
-Top-K Chunks + Query → Grounded System Prompt → Claude → Answer with Source Citations
-```
-- System prompt enforces grounded answers — the model must refuse if evidence is insufficient
-- Token usage (input/output) tracked per query with configurable cost rates
-- Lazy client initialization — no API calls until the first query
-
-### 4. Evaluation
-```
-Golden Dataset (Q/A/Pages) → Retrieval Metrics (Hit@K, MRR) → LLM-as-Judge (1-5 Score)
-```
-- **Hit@K:** Did the expected page appear in top-k retrieved chunks?
-- **MRR:** Mean Reciprocal Rank — how high did the first relevant result rank?
-- **LLM-as-Judge:** Claude rates each answer on Faithfulness, Completeness, and Conciseness (1-5 scale)
+**Why these matter:**
+- Two-stage retrieval keeps the LLM context small (~600 input tokens) — most of the cost stays in retrieval, not generation.
+- Reranking is the dominant latency cost; swapping to a smaller cross-encoder or a GPU is the obvious next lever.
+- Streaming chat (SSE) means perceived latency for the user is **time-to-first-token**, not total — Claude starts emitting after retrieval+rerank (~2.3 s median).
 
 ---
 
-## Metrics & Observability
-
-Every query emits a structured JSON log to stdout (auto-ingested by Cloud Logging on Cloud Run):
-
-```json
-{
-  "query": "What is the improvement on reach time?",
-  "retrieval_ms": 103.9,
-  "rerank_ms": 2629.7,
-  "llm_ms": 1842.5,
-  "total_ms": 6373.2,
-  "input_tokens": 530,
-  "output_tokens": 137,
-  "cost_usd": 0.003645,
-  "top_score": -2.4085,
-  "chunks": 5
-}
-```
-
-**What's tracked:**
-- **Latency breakdown** — retrieval, reranking, and LLM generation timed independently via context manager instrumentation
-- **Token economics** — input/output tokens with configurable per-million-token cost rates
-- **Relevance signal** — top cross-encoder score as a retrieval quality proxy
-- **Structured logging** — JSON to stdout, auto-captured by Cloud Logging on Cloud Run
-
----
-
-## Key Engineering Decisions
-
-| Decision | Rationale |
-|---|---|
-| **No LangChain / LlamaIndex** | Full control over every component — easier to debug, profile, and optimize |
-| **Two-stage retrieval** | Embedding search is fast but imprecise; cross-encoder reranking adds precision without the cost of reranking the entire corpus |
-| **SHA-256 fingerprint caching** | Avoids redundant embedding computation — critical when ingestion involves expensive model inference |
-| **Structured JSON logging** | Metrics emitted to stdout as JSON — Cloud Logging ingests automatically, no file I/O on ephemeral containers |
-| **Pydantic Settings** | Type-safe, env-driven configuration with validation — no stringly-typed configs or missing key surprises |
-| **Context manager latency tracking** | `with metrics.track_latency("retrieval"):` — composable instrumentation that's impossible to forget to close |
-| **Lazy model loading** | Models load on first use, not at import — keeps tests fast and startup cheap |
-| **Source-tagged vector store** | Each ingested source gets an MD5-based tag, enabling per-source cache invalidation without wiping the entire collection |
-
----
-
-## Tech Stack
-
-| Layer | Technology | Why |
-|---|---|---|
-| **LLM** | Claude (claude-sonnet-4-6) | Strong instruction-following, structured output, cost-effective |
-| **Embeddings** | BAAI/bge-base-en-v1.5 (768-dim) | Top-tier open embedding model with query/passage prefix support |
-| **Reranker** | cross-encoder/ms-marco-MiniLM-L-6-v2 | Fast cross-encoder trained on MS MARCO — strong relevance signal |
-| **Vector Store** | Pinecone (serverless) | Managed, scalable, no infra to maintain — persistent across deploys |
-| **API** | FastAPI + Uvicorn | Async-ready, auto-generated OpenAPI docs, Pydantic integration |
-| **CLI** | Click | Clean subcommand interface with built-in help |
-| **Config** | Pydantic Settings + .env | Type-safe env var parsing with defaults and validation |
-| **Deployment** | Docker + Google Cloud Run | Serverless containers, auto-scaling, zero infra management |
-
----
-
-## Project Structure
-
-```
-ProfessionalRAG/
-├── api/
-│   └── server.py              # FastAPI REST API (5 endpoints)
-├── ingestion/
-│   ├── reader.py               # PDF extraction + GitHub repo cloning + SHA-256 fingerprinting
-│   └── chunker.py              # Zero-dependency recursive character splitter
-├── retrieval/
-│   ├── embedder.py             # BGE embedding with query:/passage: prefixes
-│   ├── store.py                # Pinecone vector store with per-source fingerprint cache invalidation
-│   └── reranker.py             # Cross-encoder reranker (MS MARCO)
-├── generation/
-│   └── llm.py                  # Claude client with grounded system prompt + token tracking
-├── evaluation/
-│   ├── golden.py               # Golden dataset eval (Hit@K, MRR)
-│   └── judge.py                # LLM-as-judge scoring (Faithfulness/Completeness/Conciseness)
-├── monitoring/
-│   └── metrics.py              # Per-query latency, tokens, cost — structured JSON to stdout (Cloud Logging)
-├── pipeline.py                 # Orchestrator: ingest → retrieve → rerank → generate → evaluate
-├── config.py                   # Pydantic Settings (env-driven, type-safe)
-├── cli.py                      # Click CLI (ingest, query, evaluate, stats, serve)
-├── Dockerfile                  # Production container (python:3.12-slim, Cloud Run ready)
-└── golden_example.json         # Example evaluation dataset
-```
-
----
-
-## API Endpoints
+## API
 
 | Endpoint | Method | Purpose |
 |---|---|---|
-| `/health` | `GET` | Health check + document count |
-| `/ingest` | `POST` | Ingest PDF(s) with fingerprint-based dedup |
-| `/query` | `POST` | Full retrieve → rerank → generate pipeline |
-| `/evaluate` | `POST` | Run eval against golden dataset |
-| `/metrics` | `GET` | Aggregated performance statistics |
+| `/health` | `GET` | Liveness + corpus size (unauthenticated) |
+| `/ingest` | `POST` | Ingest one or many sources with SHA-256 dedup |
+| `/query` | `POST` | Full retrieve → rerank → generate, JSON response |
+| `/chat` | `POST` | Same pipeline, streaming SSE (`sources` → `token`* → `done`) |
+| `/evaluate` | `POST` | Golden-dataset eval (Hit@K, MRR, LLM-as-judge) |
+| `/metrics` | `GET` | Aggregated per-query stats |
+| `/track` | `POST` | Record a visit event (pageview, tab click, outbound, chat, time-on-site) |
+| `/visits` | `GET` | Visit analytics with source / page / device / tab breakdowns |
 
-**Example query response:**
-
-```json
-{
-  "answer": "The reach time improved by 15% compared to...",
-  "sources": [
-    { "page": 12, "score": 0.8742, "text": "..." }
-  ],
-  "metrics": {
-    "total_ms": 4200.3,
-    "llm_ms": 1842.5,
-    "cost_usd": 0.003645,
-    "top_score": 0.8742
-  }
-}
-```
+All endpoints except `/health` require `Authorization: Bearer $ProfessionalRAG_KEY`. The app **fails closed at boot** if the key isn't set — no silent open-API state.
 
 ---
 
-## Quickstart
+## Project Layout
 
-```bash
-# Clone & install
-git clone https://github.com/vikhyatchauhan/ProfessionalRAG.git
-cd ProfessionalRAG
-pip install -r requirements.txt
-
-# Configure
-cp .env.example .env   # Add your ANTHROPIC_API_KEY and PINECONE_API_KEY
-
-# Ingest a document
-python cli.py ingest /path/to/document.pdf
-
-# Query
-python cli.py query "What methodology was used in this research?"
-
-# Start the API server
-python cli.py serve
-
-# Run evaluation against a golden dataset
-python cli.py evaluate golden_example.json
-
-# View aggregated metrics
-python cli.py stats --last 50
 ```
-
-### Deploy to Cloud Run
-
-```bash
-# Store secrets in GCP Secret Manager
-echo -n "sk-ant-..." | gcloud secrets create anthropic-key --data-file=-
-echo -n "pcsk_..."   | gcloud secrets create pinecone-key --data-file=-
-
-# Deploy from source (builds via Cloud Build automatically)
-gcloud run deploy professional-rag \
-  --source . \
-  --region us-central1 \
-  --port 8080 \
-  --cpu 2 \
-  --memory 4Gi \
-  --min-instances 1 \
-  --max-instances 3 \
-  --concurrency 4 \
-  --timeout 300 \
-  --no-cpu-throttling \
-  --set-secrets ANTHROPIC_API_KEY=anthropic-key:latest,PINECONE_API_KEY=pinecone-key:latest \
-  --allow-unauthenticated
+api/server.py            FastAPI app · auth middleware · rate limits · SSE streaming
+pipeline.py              Orchestrator: ingest → retrieve → rerank → generate → evaluate
+ingestion/               Multi-format reader (PDF, DOCX, PPTX, CSV, JSON, URL, repo, image)
+retrieval/               BGE embedder · Pinecone store · MS-MARCO cross-encoder
+generation/llm.py        Claude client with grounded system prompt + token tracking
+evaluation/              Hit@K / MRR + LLM-as-judge (faithfulness, completeness, conciseness)
+monitoring/metrics.py    Per-query latency + token + USD telemetry to JSONL
+monitoring/visits.py     DynamoDB-backed analytics for the live demo site
+tests/                   18 pytest tests · stubs all externals · runs in ~3s
+Dockerfile               python:3.12-slim · models pre-baked · HEALTHCHECK on /health
 ```
 
 ---
 
 ## Configuration
 
-All settings are environment-driven via Pydantic Settings:
+Environment-driven via Pydantic Settings (loads `.env`):
 
-| Variable | Default | Description |
+| Variable | Default | Required |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | — | Required |
-| `PINECONE_API_KEY` | — | Required |
-| `PINECONE_INDEX` | `professional-rag` | Pinecone index name |
-| `PINECONE_CLOUD` | `aws` | Cloud provider |
-| `PINECONE_REGION` | `us-east-1` | Region |
-| `LLM_MODEL` | `claude-sonnet-4-6` | LLM model |
-| `EMBEDDING_MODEL` | `BAAI/bge-base-en-v1.5` | Embedding model |
-| `RERANKER_MODEL` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Reranker model |
-| `CHUNK_SIZE` | `500` | Characters per chunk |
-| `CHUNK_OVERLAP` | `50` | Overlap between chunks |
-| `CANDIDATE_COUNT` | `50` | Embedding candidates before reranking |
-| `TOP_K` | `5` | Final results after reranking |
-| `COST_PER_M_INPUT_TOKENS` | `3.0` | USD per million input tokens |
-| `COST_PER_M_OUTPUT_TOKENS` | `15.0` | USD per million output tokens |
+| `ANTHROPIC_API_KEY` | — | ✓ |
+| `PINECONE_API_KEY` | — | ✓ |
+| `ProfessionalRAG_KEY` | — | ✓ (app refuses to start without it) |
+| `PINECONE_INDEX` | `professional-rag` | |
+| `LLM_MODEL` | `claude-sonnet-4-6` | |
+| `EMBEDDING_MODEL` | `BAAI/bge-base-en-v1.5` | |
+| `RERANKER_MODEL` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | |
+| `CHUNK_SIZE` / `CHUNK_OVERLAP` | `1200` / `200` | |
+| `CANDIDATE_COUNT` / `TOP_K` | `50` / `5` | |
+
+On EC2 the AWS region is hard-coded to `us-east-1`; the instance needs an IAM role with DynamoDB permissions for the `professionalrag-visits` table.
+
+---
+
+## What I Learned
+
+- **Two-stage retrieval is mostly a latency story, not a quality story.** Reranking dominates the request budget (median 2 s of a 9.3 s total). The real win was keeping LLM context tight (~600 input tokens) — generation cost stays predictable even as the corpus grows past 5k chunks.
+- **Fail closed, not open.** The original auth middleware silently disabled itself when `ProfessionalRAG_KEY` was missing. Replacing that with a startup-time `RuntimeError` turned a latent security hole into a loud, obvious deployment failure — the kind of bug you want to hit in `docker run`, not in production.
+- **Migrating storage layers exposes hidden coupling.** Moving visit analytics from Firestore to DynamoDB looked like a one-file change until the `/visits` handler turned out to still be calling `.where().stream().to_dict()` on what was now a plain list. A small test suite that exercises every endpoint with stubbed externals (3 s, no AWS creds) catches this class of half-migration immediately.
 
 ---
 

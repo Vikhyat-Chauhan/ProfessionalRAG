@@ -6,27 +6,43 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request, Query
+from fastapi.concurrency import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-from google.cloud import firestore
 
 from pipeline import RAGPipeline
 from monitoring.metrics import metrics
+from monitoring.visits import create_table_if_needed, write_event, read_events
 from config import settings
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(name)s  %(message)s")
 
+pipeline: RAGPipeline | None = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global pipeline
+    if not settings.api_key:
+        raise RuntimeError(
+            "ProfessionalRAG_KEY is not set — refusing to start with auth disabled."
+        )
+    create_table_if_needed()
+    pipeline = RAGPipeline()
+    yield
+
+
 limiter = Limiter(key_func=get_remote_address)
-app = FastAPI(title="ProfessionalRAG", version="1.0.0")
+app = FastAPI(title="ProfessionalRAG", version="1.0.0", lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, lambda req, exc: JSONResponse(
     status_code=429, content={"detail": "Rate limit exceeded. Try again later."},
 ))
-
+    
 ALLOWED_ORIGINS = [
     "https://vikhyatchauhan.com",
     "https://vikhyatchauhan.com/chat",
@@ -40,24 +56,11 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
 )
 
-pipeline = RAGPipeline()
-
-_db: firestore.Client | None = None
-
-def get_db() -> firestore.Client:
-    """Lazy Firestore client — created on first use."""
-    global _db
-    if _db is None:
-        _db = firestore.Client(project=settings.gcp_project or None)
-    return _db
-
 
 @app.middleware("http")
 async def verify_api_key(request: Request, call_next):
     """Reject requests without a valid API key (skip health check)."""
     if request.url.path == "/health":
-        return await call_next(request)
-    if not settings.api_key:
         return await call_next(request)
     auth = request.headers.get("Authorization", "")
     if auth != f"Bearer {settings.api_key}":
@@ -180,7 +183,6 @@ def chat(request: Request, req: ChatRequest):
     metrics.start_query(req.message)
 
     # Retrieve + rerank
-    from config import settings
     k = req.top_k or settings.top_k
 
     with metrics.track_latency("retrieval"):
@@ -257,7 +259,7 @@ async def track_visit(request: Request, req: TrackRequest):
     if req.event == "pageview":
         doc["source"] = req.utm_source or req.ref or req.source or "direct"
 
-    get_db().collection(settings.firestore_collection).add(doc)
+    write_event(doc)
 
 
 @app.get("/visits")
@@ -268,16 +270,7 @@ def get_visits(
     source: Optional[str] = Query(default=None),
 ):
     """Return visit analytics with event breakdowns."""
-    from datetime import timedelta
-
-    col = get_db().collection(settings.firestore_collection)
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-
-    q = col.where("timestamp", ">=", cutoff)
-    if source:
-        q = q.where("source", "==", source)
-
-    docs = q.stream()
+    events = read_events(days=days, source=source)
 
     by_event: dict[str, int] = {}
     by_source: dict[str, int] = {}
@@ -289,9 +282,9 @@ def get_visits(
     chat_messages = 0
     time_on_site_samples: list[int] = []
 
-    for doc in docs:
-        d = doc.to_dict()
-        event = d.get("event", "pageview")
+    for d in events:
+        # pk stores the event type in DynamoDB; fall back to legacy 'event' field
+        event = d.get("pk") or d.get("event", "pageview")
         by_event[event] = by_event.get(event, 0) + 1
 
         if event == "pageview":
@@ -315,7 +308,8 @@ def get_visits(
         elif event == "time_on_site":
             secs = d.get("seconds")
             if secs:
-                time_on_site_samples.append(secs)
+                # DynamoDB returns numbers as Decimal — cast to int
+                time_on_site_samples.append(int(secs))
 
     avg_time = round(sum(time_on_site_samples) / len(time_on_site_samples)) if time_on_site_samples else 0
 
