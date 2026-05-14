@@ -16,11 +16,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Pre-download models at build time — NOT at runtime
 # This bakes the weights into the image so cold start is instant
 # bge-base-en-v1.5 (~440MB) + MiniLM-L-6-v2 (~66MB)
-RUN python -c "
-from sentence_transformers import SentenceTransformer, CrossEncoder
-SentenceTransformer('BAAI/bge-base-en-v1.5')
-CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
-"
+RUN python -c "from sentence_transformers import SentenceTransformer, CrossEncoder; SentenceTransformer('BAAI/bge-base-en-v1.5'); CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')"
 
 COPY . .
 
