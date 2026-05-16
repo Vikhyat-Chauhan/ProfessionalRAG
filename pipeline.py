@@ -4,7 +4,10 @@ import logging
 from pathlib import Path
 
 from config import settings
-from ingestion.reader import read_source, URL_RE, file_fingerprint, dir_fingerprint
+from ingestion.reader import (
+    read_source, URL_RE, file_fingerprint, dir_fingerprint,
+    is_s3_uri, s3_fingerprint,
+)
 from ingestion.chunker import ChunkHelper, ChunkConfig
 from retrieval.embedder import Embedder
 from retrieval.store import VectorStore
@@ -30,8 +33,12 @@ class RAGPipeline:
         Skips ingestion if the source hasn't changed (based on SHA-256),
         unless force=True.
         """
-        is_local_file = not URL_RE.match(source) and not Path(source).is_dir()
-        fp = file_fingerprint(source) if is_local_file else dir_fingerprint(source)
+        if is_s3_uri(source):
+            fp = s3_fingerprint(source)
+        elif URL_RE.match(source) or Path(source).is_dir():
+            fp = dir_fingerprint(source)
+        else:
+            fp = file_fingerprint(source)
 
         if not force and not self.store.needs_ingestion(fp):
             log.info("Skipping ingestion — source unchanged")

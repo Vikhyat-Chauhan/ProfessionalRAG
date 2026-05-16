@@ -34,9 +34,21 @@ GITHUB_URL_RE = re.compile(
 )
 
 URL_RE = re.compile(r"^https?://")
+S3_URI_RE = re.compile(r"^s3://(?P<bucket>[^/]+)/(?P<key>.+)$")
 
 PLAIN_TEXT_EXTENSIONS = {".txt", ".md", ".markdown", ".rst", ".log"}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp", ".gif"}
+
+
+def is_s3_uri(source: str) -> bool:
+    return bool(S3_URI_RE.match(source))
+
+
+def parse_s3_uri(source: str) -> tuple[str, str]:
+    m = S3_URI_RE.match(source)
+    if not m:
+        raise ValueError(f"Not an S3 URI: {source}")
+    return m["bucket"], m["key"]
 
 
 # ── Individual readers ────────────────────────────────────────────────
@@ -199,6 +211,10 @@ def read_source(source: str) -> list[dict]:
 
     Returns a list of dicts with keys: text, page, source.
     """
+    # S3 object
+    if is_s3_uri(source):
+        return read_s3(source)
+
     # GitHub repo
     if is_github_url(source):
         return read_repo(source)
@@ -306,6 +322,51 @@ def _read_directory(root: Path, source: str) -> list[dict]:
         })
     log.info("Read %d files from %s", len(docs), source)
     return docs
+
+
+def read_s3(source: str) -> list[dict]:
+    """Download an S3 object to a temp file and dispatch by extension.
+
+    Uses the local boto3 default credential chain — on EC2 this is the
+    instance role; locally it's whatever ~/.aws/credentials or env vars
+    supply. The temp file is cleaned up after parsing.
+    """
+    import boto3  # imported lazily so tests can stub without the module loaded
+
+    bucket, key = parse_s3_uri(source)
+    suffix = Path(key).suffix.lower() or ".bin"
+
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp_path = tmp.name
+
+    try:
+        log.info("Downloading s3://%s/%s → %s", bucket, key, tmp_path)
+        boto3.client("s3").download_file(bucket, key, tmp_path)
+        pages = read_source(tmp_path)  # recursive dispatch on the local copy
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+
+    # Replace the temp-file source path with the original S3 URI so chunks
+    # remember where they came from, not the ephemeral local path.
+    for p in pages:
+        p["source"] = source
+    return pages
+
+
+def s3_fingerprint(source: str) -> str:
+    """ETag of the S3 object — changes whenever the object's bytes do.
+
+    For single-part uploads ETag is the MD5; for multi-part it's a
+    deterministic composite. Either way it's stable per content version,
+    which is all the fingerprint cache needs.
+    """
+    import boto3
+
+    bucket, key = parse_s3_uri(source)
+    head = boto3.client("s3").head_object(Bucket=bucket, Key=key)
+    # ETag is wrapped in quotes; strip them for a clean hex string
+    etag = head["ETag"].strip('"')
+    return f"s3://{bucket}/{key}@{etag}"
 
 
 def file_fingerprint(file_path: str) -> str:
