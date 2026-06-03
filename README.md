@@ -117,9 +117,24 @@ Measured over 10 production queries against a 5,144-chunk PDF corpus (`metrics_l
 | `/evaluate` | `POST` | Golden-dataset eval (Hit@K, MRR, LLM-as-judge) |
 | `/metrics` | `GET` | Aggregated per-query stats |
 | `/track` | `POST` | Record a visit event (pageview, tab click, outbound, chat, time-on-site) |
-| `/visits` | `GET` | Visit analytics with source / page / device / tab breakdowns |
+| `/visits` | `GET` | Visit analytics — uniques, daily time-series, bounce rate, source/page/referrer/UTM/device breakdowns, time-on-site percentiles |
+| `/dashboard` | `GET` | Self-contained Chart.js dashboard for the `/visits` data (no build step) |
 
-All endpoints except `/health` require `Authorization: Bearer $ProfessionalRAG_KEY`. The app **fails closed at boot** if the key isn't set — no silent open-API state.
+All endpoints except `/health` and `/dashboard` require `Authorization: Bearer $ProfessionalRAG_KEY`. The app **fails closed at boot** if the key isn't set — no silent open-API state. (`/dashboard` serves only static HTML/JS; the in-page fetch to `/visits` still requires the key, which the page prompts for and keeps in `localStorage`.)
+
+### Visit analytics
+
+`GET /visits` accepts either a relative window or an explicit range:
+
+| Param | Default | Notes |
+|---|---|---|
+| `days` | `30` | Relative window, 1–365 |
+| `start` / `end` | — | `YYYY-MM-DD`, inclusive; both required together, ≤ 366 days apart |
+| `source` | — | Filter pageview attribution to one source |
+
+The response adds `unique_visitors`, `bounce_rate`, `by_day` (per-day pageviews + uniques for charting), `by_referrer` / `by_utm_medium` / `by_utm_campaign` / `by_language` / `by_theme`, and `time_on_site` (`avg` / `p50` / `p90` / `p95`) on top of the original breakdowns.
+
+**Unique visitors** are counted via a daily-rotating `sha256(salt + UTC date + IP + user-agent)` hash — no cookies, no raw-IP storage, non-reversible (the technique Plausible uses). Per-day uniques are exact; because the salt rotates daily, a visitor spanning multiple days is counted once per day. The salt comes from `VISIT_SALT` (falls back to `ProfessionalRAG_KEY` if unset).
 
 ---
 
@@ -133,8 +148,9 @@ retrieval/               BGE embedder · Pinecone store · MS-MARCO cross-encode
 generation/llm.py        Claude client with grounded system prompt + token tracking
 evaluation/              Hit@K / MRR + LLM-as-judge (faithfulness, completeness, conciseness)
 monitoring/metrics.py    Per-query latency + token + USD telemetry to JSONL
-monitoring/visits.py     DynamoDB-backed analytics for the live demo site
-tests/                   18 pytest tests · stubs all externals · runs in ~3s
+monitoring/visits.py     DynamoDB-backed event storage + daily-rotating visitor hash
+monitoring/analytics.py  Pure aggregation: uniques, by-day series, bounce, percentiles
+tests/                   pytest suite · stubs all externals · no network · runs in ~3s
 Dockerfile               python:3.12-slim · models pre-baked · HEALTHCHECK on /health
 ```
 
@@ -149,6 +165,7 @@ Environment-driven via Pydantic Settings (loads `.env`):
 | `ANTHROPIC_API_KEY` | — | ✓ |
 | `PINECONE_API_KEY` | — | ✓ |
 | `ProfessionalRAG_KEY` | — | ✓ (app refuses to start without it) |
+| `VISIT_SALT` | falls back to `ProfessionalRAG_KEY` | (analytics visitor-hash salt) |
 | `PINECONE_INDEX` | `professional-rag` | |
 | `LLM_MODEL` | `claude-sonnet-4-6` | |
 | `EMBEDDING_MODEL` | `BAAI/bge-base-en-v1.5` | |
