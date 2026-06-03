@@ -31,10 +31,13 @@ def stub_visits(monkeypatch, visits_store):
         item["timestamp"] = item["timestamp"].isoformat()
         visits_store.append(item)
 
-    def fake_read(days, source=None):
-        if source is None:
-            return list(visits_store)
-        return [e for e in visits_store if e.get("source") == source]
+    def fake_read(days, source=None, start=None, end=None):
+        items = list(visits_store)
+        if start and end:
+            items = [e for e in items if start <= e.get("timestamp", "")[:10] <= end]
+        if source is not None:
+            items = [e for e in items if e.get("source") == source]
+        return items
 
     # Patch both the source module and the names already imported into api.server
     for mod in (v, srv):

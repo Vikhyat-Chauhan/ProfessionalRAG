@@ -7,6 +7,10 @@ class Settings(BaseSettings):
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
     api_key: str = Field(default="", alias="ProfessionalRAG_KEY")
 
+    # Analytics — salt for the daily-rotating visitor hash. Falls back to api_key
+    # when empty, so it's optional. Set a dedicated value to decouple the two.
+    visit_salt: str = Field(default="", alias="VISIT_SALT")
+
     # Models
     llm_model: str = "claude-sonnet-4-6"
     llm_max_tokens: int = 2048
