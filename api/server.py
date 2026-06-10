@@ -352,6 +352,9 @@ _DASHBOARD_HTML = r"""<!doctype html>
     </select>
     <input type="date" id="start" style="display:none"/>
     <input type="date" id="end" style="display:none"/>
+    <select id="source" title="Filter by source / job code">
+      <option value="">All sources</option>
+    </select>
     <button class="primary" id="reload">Refresh</button>
     <button id="setkey">API key</button>
   </div>
@@ -381,6 +384,19 @@ $("#range").onchange = () => {
   $("#start").style.display = $("#end").style.display = custom ? "" : "none";
 };
 $("#reload").onclick = load;
+$("#source").onchange = load;
+
+// Rebuild the source dropdown from an unfiltered response, preserving selection.
+// Only repopulate when viewing "All" so a filtered view doesn't shrink the list.
+function populateSources(d) {
+  if ($("#source").value !== "") return;
+  const sel = $("#source");
+  const current = sel.value;
+  const sources = Object.keys(d.by_source || {});
+  sel.innerHTML = '<option value="">All sources</option>' +
+    sources.map(s => `<option value="${s}">${s}</option>`).join("");
+  sel.value = current;
+}
 
 function bar(id, obj, color) {
   const labels = Object.keys(obj).slice(0, 8), data = labels.map(l => obj[l]);
@@ -430,13 +446,17 @@ async function load() {
   } else {
     qs = `days=${$("#range").value === "custom" ? 30 : $("#range").value}`;
   }
+  const src = $("#source").value;
+  if (src) qs += `&source=${encodeURIComponent(src)}`;
   $("#status").textContent = "Loading…";
   try {
     const r = await fetch(`/visits?${qs}`, { headers: { Authorization: `Bearer ${k}` } });
     if (r.status === 401) { localStorage.removeItem("rag_api_key"); $("#status").textContent = "Invalid API key — click “API key” to re-enter."; return; }
     if (!r.ok) { $("#status").textContent = `Error ${r.status}`; return; }
     const d = await r.json();
-    $("#status").textContent = d.start ? `${d.start} → ${d.end}` : `Last ${d.days} days`;
+    const win = d.start ? `${d.start} → ${d.end}` : `Last ${d.days} days`;
+    $("#status").textContent = src ? `${win} · source: ${src}` : win;
+    populateSources(d);
     render(d);
   } catch (e) { $("#status").textContent = "Request failed: " + e; }
 }
