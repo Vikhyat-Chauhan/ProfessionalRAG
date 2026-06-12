@@ -1,8 +1,13 @@
-"""Cross-encoder reranker."""
+"""Reranker — backed by Voyage AI's hosted reranking API.
+
+Replaces the local cross-encoder. Voyage scores each candidate chunk against the
+query server-side and returns them ordered; we map the results back onto the
+original `(chunk, meta, score)` tuples by index so the pipeline is unchanged.
+"""
 
 import logging
 
-from sentence_transformers import CrossEncoder
+import voyageai
 
 from config import settings
 
@@ -12,14 +17,13 @@ log = logging.getLogger(__name__)
 class Reranker:
     def __init__(self, model_name: str | None = None):
         self._model_name = model_name or settings.reranker_model
-        self._model: CrossEncoder | None = None
+        self._client: voyageai.Client | None = None
 
     @property
-    def model(self) -> CrossEncoder:
-        if self._model is None:
-            log.info("Loading reranker model: %s", self._model_name)
-            self._model = CrossEncoder(self._model_name)
-        return self._model
+    def client(self) -> voyageai.Client:
+        if self._client is None:
+            self._client = voyageai.Client(api_key=settings.voyage_api_key)
+        return self._client
 
     def rerank(
         self,
@@ -33,10 +37,15 @@ class Reranker:
         if not chunks:
             return []
 
-        pairs = [[query, chunk] for chunk in chunks]
-        scores = self.model.predict(pairs)
-
-        ranked = sorted(
-            zip(scores, chunks, metadatas), key=lambda x: x[0], reverse=True
+        resp = self.client.rerank(
+            query=query,
+            documents=chunks,
+            model=self._model_name,
+            top_k=min(k, len(chunks)),
         )
-        return [(chunk, meta, float(score)) for score, chunk, meta in ranked[:k]]
+
+        ranked: list[tuple[str, dict, float]] = []
+        for row in resp.results:
+            i = row.index
+            ranked.append((chunks[i], metadatas[i], float(row.relevance_score)))
+        return ranked

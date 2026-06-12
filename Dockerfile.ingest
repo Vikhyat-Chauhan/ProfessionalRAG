@@ -1,0 +1,13 @@
+# Ingest Lambda container image — includes the heavy document parsers and the
+# tesseract OCR binary. Triggered by S3, not on the hot query path.
+FROM public.ecr.aws/lambda/python:3.12
+
+# tesseract for image OCR (dnf is the package manager on the AL2023 Lambda base)
+RUN dnf install -y tesseract && dnf clean all
+
+COPY requirements-ingest.txt requirements.txt ./
+RUN pip install --no-cache-dir -r requirements-ingest.txt
+
+COPY . ${LAMBDA_TASK_ROOT}/
+
+CMD ["lambda.ingest_trigger.handler"]

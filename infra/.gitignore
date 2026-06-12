@@ -1,0 +1,17 @@
+# Secrets — never commit
+secret.json
+*.auto.tfvars
+terraform.tfvars
+
+# Terraform state & local cache (.terraform.lock.hcl SHOULD be committed)
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+tfplan
+*.tfplan

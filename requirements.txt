@@ -1,19 +1,22 @@
+# Query/API runtime — lean (no torch / sentence-transformers).
+# Embedding + reranking are served by Voyage AI's hosted API; Pinecone is the
+# vector store.
 anthropic>=0.42.0
 pinecone[grpc]>=5.0.0
-sentence-transformers>=3.0.0
-pypdf>=4.0.0
+voyageai>=0.3.0
 pydantic-settings>=2.0.0
 fastapi>=0.115.0
 slowapi>=0.1.9
 uvicorn>=0.30.0
+mangum>=0.17.0          # ASGI -> AWS Lambda adapter
 click>=8.1.0
 python-dotenv>=1.0.0
-# Multi-format document support
-python-docx>=1.1.0
-python-pptx>=0.6.23
-Pillow>=10.0.0
-pytesseract>=0.3.10
 requests>=2.31.0
 beautifulsoup4>=4.12.0
+pypdf>=4.0.0            # imported at module load by ingestion.reader; pure-Python, tiny
 # Visit tracking (Boto3 for DynamoDB)
 boto3>=1.34.0
+
+# Heavier document parsers (DOCX/PPTX/image OCR) live in requirements-ingest.txt.
+# They are lazy-imported, so the query runtime never needs them. Install both for
+# local CLI use or in the ingest Lambda:  pip install -r requirements-ingest.txt

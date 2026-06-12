@@ -1,0 +1,9 @@
+# Heavier document-parsing deps used only during ingestion (lazy-imported in
+# ingestion/reader.py). Kept out of the lean query image. The ingest Lambda and
+# local CLI install these on top of requirements.txt; image OCR also needs the
+# system `tesseract-ocr` binary.
+-r requirements.txt
+python-docx>=1.1.0
+python-pptx>=0.6.23
+Pillow>=10.0.0
+pytesseract>=0.3.10

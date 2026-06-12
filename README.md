@@ -29,9 +29,9 @@ flowchart TB
     end
 
     subgraph Retrieve [Two-Stage Retrieval]
-        Embedder["BGE-base-en-v1.5<br/>768-dim"]
+        Embedder["Voyage voyage-3<br/>1024-dim (hosted API)"]
         Store[("Pinecone<br/>Serverless ANN")]
-        Reranker["Cross-Encoder<br/>ms-marco-MiniLM-L-6-v2"]
+        Reranker["Voyage rerank-2<br/>(hosted API)"]
     end
 
     subgraph Gen [Generation]
@@ -63,7 +63,7 @@ flowchart TB
 git clone https://github.com/vikhyatchauhan/ProfessionalRAG && cd ProfessionalRAG
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env   # add ANTHROPIC_API_KEY, PINECONE_API_KEY, ProfessionalRAG_KEY
+cp .env.example .env   # add ANTHROPIC_API_KEY, PINECONE_API_KEY, VOYAGE_API_KEY, ProfessionalRAG_KEY
 
 python cli.py ingest README.md           # ingest anything: pdf, docx, url, repo
 python cli.py query "what does this repo do?"
@@ -75,18 +75,29 @@ python cli.py serve                      # FastAPI on :8080
 pip install -r requirements-dev.txt && pytest      # 18 tests, ~3s, no network
 ```
 
-**Deploy to EC2:**
+**Deploy (serverless on AWS Lambda):**
+
+Embedding + reranking run on Voyage AI's hosted API, so the image is lean
+(<150 MB, no torch) and the whole service runs as two scale-to-zero Lambdas — a
+query/chat function behind a streaming Function URL, and an S3-triggered ingest
+function. Infrastructure is codified in [`infra/`](infra/) (Terraform) and deploys
+via GitHub Actions (`.github/workflows/`) on push to `main`. See
+[`infra/README.md`](infra/README.md) for bootstrap steps.
+
 ```bash
+# Local container (App Runner / self-host fallback):
 docker build -t professional-rag .
 docker run -d -p 8080:8080 --env-file .env professional-rag
-# IAM role on the EC2 instance needs: dynamodb:CreateTable, PutItem, Scan, ListTables
 ```
 
 ---
 
 ## Results
 
-Measured over 10 production queries against a 5,144-chunk PDF corpus (`metrics_log.jsonl`):
+Measured over 10 production queries against a 5,144-chunk PDF corpus (`metrics_log.jsonl`).
+These figures are the **in-process baseline** (local BGE embedder + cross-encoder on EC2);
+embedding/reranking have since moved to Voyage's hosted API, which trades local compute for
+a network call and shrinks the cold start from ~5 s / 500 MB to ~1–2 s / <150 MB:
 
 | Metric | Median | Mean | Notes |
 |---|---:|---:|---|
@@ -101,7 +112,7 @@ Measured over 10 production queries against a 5,144-chunk PDF corpus (`metrics_l
 
 **Why these matter:**
 - Two-stage retrieval keeps the LLM context small (~600 input tokens) — most of the cost stays in retrieval, not generation.
-- Reranking is the dominant latency cost; swapping to a smaller cross-encoder or a GPU is the obvious next lever.
+- Reranking was the dominant latency cost on the in-process baseline; moving it to Voyage's hosted `rerank-2` offloads that compute and removes the need for a warm, GPU-or-CPU-heavy box.
 - Streaming chat (SSE) means perceived latency for the user is **time-to-first-token**, not total — Claude starts emitting after retrieval+rerank (~2.3 s median).
 
 ---
@@ -144,7 +155,7 @@ The response adds `unique_visitors`, `bounce_rate`, `by_day` (per-day pageviews 
 api/server.py            FastAPI app · auth middleware · rate limits · SSE streaming
 pipeline.py              Orchestrator: ingest → retrieve → rerank → generate → evaluate
 ingestion/               Multi-format reader (PDF, DOCX, PPTX, CSV, JSON, URL, repo, image)
-retrieval/               BGE embedder · Pinecone store · MS-MARCO cross-encoder
+retrieval/               Voyage embedder (voyage-3) · Pinecone store · Voyage reranker (rerank-2)
 generation/llm.py        Claude client with grounded system prompt + token tracking
 evaluation/              Hit@K / MRR + LLM-as-judge (faithfulness, completeness, conciseness)
 monitoring/metrics.py    Per-query latency + token + USD telemetry to JSONL
@@ -168,12 +179,16 @@ Environment-driven via Pydantic Settings (loads `.env`):
 | `VISIT_SALT` | falls back to `ProfessionalRAG_KEY` | (analytics visitor-hash salt) |
 | `PINECONE_INDEX` | `professional-rag` | |
 | `LLM_MODEL` | `claude-sonnet-4-6` | |
-| `EMBEDDING_MODEL` | `BAAI/bge-base-en-v1.5` | |
-| `RERANKER_MODEL` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | |
+| `VOYAGE_API_KEY` | — | ✓ (hosted embeddings + reranking) |
+| `EMBEDDING_MODEL` | `voyage-3` (Voyage-hosted, 1024-dim) | |
+| `RERANKER_MODEL` | `rerank-2` (Voyage-hosted) | |
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | `1200` / `200` | |
 | `CANDIDATE_COUNT` / `TOP_K` | `50` / `5` | |
 
-On EC2 the AWS region is hard-coded to `us-east-1`; the instance needs an IAM role with DynamoDB permissions for the `professionalrag-visits` table.
+In Lambda, secrets are pulled from AWS Secrets Manager at cold start (`SECRETS_ARN`)
+rather than `.env`; the execution role grants least-privilege access to the secret,
+the `professionalrag-visits` DynamoDB table, and the docs S3 bucket. The AWS region
+defaults to `us-east-1` to match the Pinecone and DynamoDB region.
 
 ---
 

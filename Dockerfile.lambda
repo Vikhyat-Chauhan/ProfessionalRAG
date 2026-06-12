@@ -1,0 +1,10 @@
+# Query/chat Lambda container image — lean (no torch, no model weights).
+FROM public.ecr.aws/lambda/python:3.12
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . ${LAMBDA_TASK_ROOT}/
+
+# Mangum adapter exposed as api/lambda_handler.py:handler
+CMD ["api.lambda_handler.handler"]

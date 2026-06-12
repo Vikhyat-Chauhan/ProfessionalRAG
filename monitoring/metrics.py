@@ -6,6 +6,7 @@ and keeps an in-memory buffer for the /metrics summary endpoint.
 
 import json
 import logging
+import os
 import time
 from collections import deque
 from contextlib import contextmanager
@@ -14,6 +15,11 @@ from dataclasses import dataclass
 from config import settings
 
 log = logging.getLogger(__name__)
+
+# When set (e.g. in Lambda), per-query metrics are also emitted as CloudWatch
+# Embedded Metric Format so latency/cost aggregate across ephemeral instances —
+# the in-memory buffer alone resets on every cold start.
+_EMF_NAMESPACE = os.environ.get("EMF_NAMESPACE")
 
 
 @dataclass
@@ -88,9 +94,36 @@ class MetricsCollector:
             "top_score": round(self._current.top_score, 4),
             "chunks": self._current.chunks_retrieved,
         }
-        # Structured JSON log → Cloud Logging picks this up automatically
+        # Structured JSON log → Cloud Logging / CloudWatch Logs picks this up
         log.info(json.dumps(entry))
         self._history.append(entry)
+        self._emit_emf()
+
+    def _emit_emf(self) -> None:
+        """Emit CloudWatch EMF so metrics persist across ephemeral instances."""
+        if not _EMF_NAMESPACE:
+            return
+        emf = {
+            "_aws": {
+                "Timestamp": int(time.time() * 1000),
+                "CloudWatchMetrics": [{
+                    "Namespace": _EMF_NAMESPACE,
+                    "Dimensions": [[]],
+                    "Metrics": [
+                        {"Name": "TotalLatencyMs", "Unit": "Milliseconds"},
+                        {"Name": "LlmLatencyMs", "Unit": "Milliseconds"},
+                        {"Name": "CostUsd", "Unit": "None"},
+                        {"Name": "TopScore", "Unit": "None"},
+                    ],
+                }],
+            },
+            "TotalLatencyMs": round(self._current.total_latency_ms, 1),
+            "LlmLatencyMs": round(self._current.llm_latency_ms, 1),
+            "CostUsd": round(self._current.cost_usd, 6),
+            "TopScore": round(self._current.top_score, 4),
+        }
+        # Bare print: EMF must be the whole log line, not wrapped by a formatter.
+        print(json.dumps(emf))
 
     def summary(self, last_n: int = 50) -> dict:
         """Aggregate stats from recent queries (in-memory buffer)."""
