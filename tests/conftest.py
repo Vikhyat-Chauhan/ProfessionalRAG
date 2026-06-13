@@ -14,39 +14,6 @@ os.environ.setdefault("ANTHROPIC_API_KEY", "test-anthropic")
 os.environ.setdefault("PINECONE_API_KEY", "test-pinecone")
 
 
-@pytest.fixture
-def visits_store():
-    """In-memory replacement for the DynamoDB-backed visits table."""
-    return []
-
-
-@pytest.fixture
-def stub_visits(monkeypatch, visits_store):
-    import monitoring.visits as v
-    import api.server as srv
-
-    def fake_write(doc):
-        item = {k: val for k, val in doc.items() if val is not None}
-        item["pk"] = item.pop("event", "pageview")
-        item["timestamp"] = item["timestamp"].isoformat()
-        visits_store.append(item)
-
-    def fake_read(days, source=None, start=None, end=None):
-        items = list(visits_store)
-        if start and end:
-            items = [e for e in items if start <= e.get("timestamp", "")[:10] <= end]
-        if source is not None:
-            items = [e for e in items if e.get("source") == source]
-        return items
-
-    # Patch both the source module and the names already imported into api.server
-    for mod in (v, srv):
-        monkeypatch.setattr(mod, "create_table_if_needed", lambda: None, raising=False)
-        monkeypatch.setattr(mod, "write_event", fake_write, raising=False)
-        monkeypatch.setattr(mod, "read_events", fake_read, raising=False)
-    return visits_store
-
-
 class _FakeStore:
     def __init__(self, count=10):
         self._count = count
@@ -93,8 +60,8 @@ class FakePipeline:
 
 
 @pytest.fixture
-def client(monkeypatch, stub_visits):
-    """FastAPI TestClient with all externals stubbed."""
+def client(monkeypatch):
+    """Chat/RAG API TestClient with the heavy pipeline stubbed."""
     import api.server as srv
 
     # Replace the heavy pipeline before the lifespan event runs
