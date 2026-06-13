@@ -1,12 +1,15 @@
 # fly.toml — ProfessionalRAG query/chat API
 #
-# Deploys the root Dockerfile (uvicorn api.server:app on :8080) as a single
-# always-on machine so the first request is instant — no cold start. Secrets are
-# set out-of-band with `fly secrets set` (never in this file). The S3-triggered
-# ingest Lambda is not used here: populate Pinecone once with `python cli.py
-# ingest <docs>`; this service only serves /query and /chat.
+# Deploys the root Dockerfile (uvicorn api.server:app on :8080). This serves a
+# low-traffic personal portfolio chat widget (/query and /chat), so the machine
+# scales to zero when idle and resumes from a memory snapshot ("suspend") on the
+# next request — sub-second resume, ~$0 while idle, versus ~$3.32/mo for an
+# always-on machine. Secrets are set out-of-band with `fly secrets set` (never in
+# this file). The S3-triggered ingest Lambda is not used here: populate Pinecone
+# once with `python cli.py ingest <docs>`; this service only serves /query and /chat.
 #
-# `fly launch` may rename the app if "professionalrag" is taken globally.
+# Want zero resume latency instead (always-on, ~$3.32/mo)? Set
+# auto_stop_machines = "off" and min_machines_running = 1.
 
 app            = "professionalrag"
 primary_region = "iad"             # us-east-1 area — near Pinecone & the AWS analytics table
@@ -17,9 +20,11 @@ primary_region = "iad"             # us-east-1 area — near Pinecone & the AWS 
 [http_service]
   internal_port       = 8080
   force_https         = true
-  auto_stop_machines  = false      # always-on: the whole point is "feels instant"
-  auto_start_machines = true
-  min_machines_running = 1
+  # Scale to zero when idle; suspend keeps a memory snapshot so resume is
+  # sub-second (much faster than a cold "stop"). min 0 = pay only while serving.
+  auto_stop_machines   = "suspend"
+  auto_start_machines  = true
+  min_machines_running = 0
 
   [[http_service.checks]]
     method   = "get"
@@ -30,4 +35,4 @@ primary_region = "iad"             # us-east-1 area — near Pinecone & the AWS 
 
 [[vm]]
   size   = "shared-cpu-1x"
-  memory = "512mb"
+  memory = "512mb"                 # lean runtime (no torch); 512MB gives safe headroom

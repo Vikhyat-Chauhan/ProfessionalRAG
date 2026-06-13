@@ -1,19 +1,12 @@
 name: Deploy
 
-# Build both Lambda images, push to ECR, and roll the functions to the new image.
-# Auth is via GitHub OIDC -> the professionalrag-ci-deploy IAM role (no static keys).
+# Deploy the query/chat API to Fly.io on every push to main.
+# The image is built on Fly's remote builder (--remote-only), so the runner only
+# needs flyctl + a deploy token. Runtime secrets live in `fly secrets`, never here.
 on:
   push:
     branches: [main]
   workflow_dispatch:
-
-permissions:
-  id-token: write # required for OIDC
-  contents: read
-
-env:
-  AWS_REGION: us-east-1
-  PROJECT: professionalrag
 
 concurrency:
   group: deploy-${{ github.ref }}
@@ -22,39 +15,10 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    needs: []
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Login to Amazon ECR
-        id: ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build, push, and deploy
-        env:
-          REGISTRY: ${{ steps.ecr.outputs.registry }}
-          TAG: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          QUERY_REPO="$REGISTRY/$PROJECT-query"
-          INGEST_REPO="$REGISTRY/$PROJECT-ingest"
-
-          docker build -f Dockerfile.lambda -t "$QUERY_REPO:$TAG"  -t "$QUERY_REPO:latest" .
-          docker build -f Dockerfile.ingest -t "$INGEST_REPO:$TAG" -t "$INGEST_REPO:latest" .
-
-          docker push "$QUERY_REPO:$TAG";  docker push "$QUERY_REPO:latest"
-          docker push "$INGEST_REPO:$TAG"; docker push "$INGEST_REPO:latest"
-
-          aws lambda update-function-code --function-name "$PROJECT-query" \
-            --image-uri "$QUERY_REPO:$TAG" >/dev/null
-          aws lambda update-function-code --function-name "$PROJECT-ingest" \
-            --image-uri "$INGEST_REPO:$TAG" >/dev/null
-
-          aws lambda wait function-updated --function-name "$PROJECT-query"
-          aws lambda wait function-updated --function-name "$PROJECT-ingest"
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Deploy to Fly.io
+        run: flyctl deploy --remote-only
